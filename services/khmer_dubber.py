@@ -4,7 +4,9 @@ import json
 import base64
 import asyncio
 import math
+import random
 import shutil
+import tempfile
 import requests
 import edge_tts
 from services import audio_processor
@@ -22,6 +24,82 @@ def clean_pure_khmer(text: str) -> str:
     # 4. Clean multiple spaces and trim
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
+
+# ------------------------------------------------------------------
+# Natural Human-Like Delivery Engine
+# Edge-TTS only accepts one flat pitch/rate for an entire utterance, which is
+# why raw neural TTS reads as a flat, robotic monotone. Real speech instead
+# breathes: it pauses at clause boundaries, rises on questions, punches
+# exclamations, trails off on ellipses, and never repeats the exact same
+# pitch/rate twice in a row. We simulate that by splitting each line into
+# clauses at natural punctuation, synthesizing each with its own slightly
+# varied pitch/rate + micro-jitter, then stitching them back together with
+# punctuation-aware silence gaps (a "breath") in between.
+# ------------------------------------------------------------------
+_CLAUSE_SPLIT_RE = re.compile(r'([^។!?,;:៖…]+)([។!?,;:៖…]*)')
+_STRONG_END_PUNCT = set('។!?')
+_MEDIUM_END_PUNCT = set(',;:៖')
+
+
+def _parse_hz(pitch_str: str) -> int:
+    try:
+        return int(str(pitch_str).replace('Hz', '').replace('+', '').strip())
+    except Exception:
+        return 0
+
+
+def _parse_pct(rate_str: str) -> int:
+    try:
+        return int(str(rate_str).replace('%', '').replace('+', '').strip())
+    except Exception:
+        return 0
+
+
+def split_into_clauses(text: str):
+    """Split Khmer text into (clause_text, trailing_punctuation) pairs, preserving
+    the punctuation so downstream prosody/pause logic can react to it."""
+    normalized = (text or '').strip().replace('...', '…')
+    clauses = []
+    for match in _CLAUSE_SPLIT_RE.finditer(normalized):
+        chunk = match.group(1).strip()
+        punct = match.group(2)
+        if chunk:
+            clauses.append((chunk, punct))
+    return clauses if clauses else ([(normalized, '')] if normalized else [])
+
+
+def _pause_ms_for_punct(punct: str) -> int:
+    """Natural breathing-room duration (ms) after a clause, based on how strong
+    its closing punctuation is."""
+    if not punct:
+        return 90
+    if '…' in punct:
+        return 520
+    if any(c in _STRONG_END_PUNCT for c in punct):
+        return 360
+    if any(c in _MEDIUM_END_PUNCT for c in punct):
+        return 190
+    return 120
+
+
+def _clause_prosody(base_pitch_hz: int, base_rate_pct: int, punct: str):
+    """Derive a per-clause pitch/rate that layers natural micro-variation and
+    punctuation-driven intonation contour on top of the character's base voice."""
+    pitch = base_pitch_hz + random.randint(-2, 2)
+    rate = base_rate_pct + random.randint(-3, 3)
+
+    if '?' in punct:
+        pitch += 7  # rising intonation for questions, like real speech
+    elif '!' in punct:
+        pitch += 4
+        rate += 5  # punchier delivery for exclamations
+    elif '…' in punct:
+        rate -= 7  # trailing off / hesitation
+
+    pitch = max(-50, min(50, pitch))
+    rate = max(-50, min(50, rate))
+    return pitch, rate
+
 
 ROLE_THEATRICAL_PROFILES = {
     'male_lead': {'voice': 'km-KH-PisethNeural', 'pitch': '+0Hz', 'rate': '+0%'},
@@ -45,14 +123,46 @@ class KhmerDubber:
         pass
 
     async def synthesize_khmer_speech(self, khmer_text: str, output_path: str, voice_name: str = 'km-KH-PisethNeural', pitch: str = '+0Hz', rate: str = '+0%'):
-        """Synthesize Khmer text directly via Python native edge-tts (100% pure authentic Khmer)."""
+        """Synthesize Khmer text via Python native edge-tts (100% pure authentic Khmer).
+
+        Lines with multiple clauses are synthesized clause-by-clause with natural
+        micro-variation in pitch/rate and punctuation-aware breathing pauses
+        stitched between them, so the result sounds like a human actor delivering
+        the line rather than a single flat, robotic pass over the whole sentence.
+        """
         khmer_text = clean_pure_khmer(khmer_text)
         if not khmer_text or not any('\u1780' <= c <= '\u17FF' for c in khmer_text):
             khmer_text = "បាទ"
 
         temp_mp3 = output_path if output_path.endswith('.mp3') else f"{output_path}_temp.mp3"
-        communicate = edge_tts.Communicate(khmer_text, voice_name, pitch=pitch, rate=rate)
-        await communicate.save(temp_mp3)
+        clauses = split_into_clauses(khmer_text)
+
+        if len(clauses) <= 1:
+            communicate = edge_tts.Communicate(khmer_text, voice_name, pitch=pitch, rate=rate)
+            await communicate.save(temp_mp3)
+        else:
+            base_pitch_hz = _parse_hz(pitch)
+            base_rate_pct = _parse_pct(rate)
+            work_dir = tempfile.mkdtemp(prefix='khmer_clauses_')
+            try:
+                clause_files = []
+                pause_list = []
+                for i, (clause_text, punct) in enumerate(clauses):
+                    c_pitch, c_rate = _clause_prosody(base_pitch_hz, base_rate_pct, punct)
+                    clause_path = os.path.join(work_dir, f'clause_{i}.mp3')
+                    communicate = edge_tts.Communicate(clause_text, voice_name, pitch=f"{c_pitch:+d}Hz", rate=f"{c_rate:+d}%")
+                    await communicate.save(clause_path)
+                    clause_files.append(clause_path)
+                    if i < len(clauses) - 1:
+                        pause_list.append(_pause_ms_for_punct(punct))
+
+                audio_processor.concat_audio_with_pauses(clause_files, pause_list, temp_mp3)
+            except Exception as stitch_err:
+                print(f"⚠️ Natural pacing notice, falling back to single-pass synthesis: {stitch_err}")
+                communicate = edge_tts.Communicate(khmer_text, voice_name, pitch=pitch, rate=rate)
+                await communicate.save(temp_mp3)
+            finally:
+                shutil.rmtree(work_dir, ignore_errors=True)
 
         if output_path.endswith('.wav'):
             audio_processor.run_command(f'ffmpeg -y -i "{temp_mp3}" -ar 44100 -ac 2 "{output_path}"')

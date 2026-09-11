@@ -69,7 +69,45 @@ function showToast(message, type = 'info') {
     toast.style.transform = 'translateY(10px) scale(0.95)';
     toast.style.transition = 'all 0.3s ease';
     setTimeout(() => toast.remove(), 300);
-  }, 4000);
+  }, type === 'error' || type === 'warning' ? 6000 : 4000);
+}
+
+// Studio Confirm Modal (replaces the blocking native confirm() dialog)
+function showConfirmModal(message, options = {}) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('genericConfirmModal');
+    if (!modal) { resolve(window.confirm(message)); return; }
+
+    const titleEl = document.getElementById('genericConfirmTitle');
+    const msgEl = document.getElementById('genericConfirmMessage');
+    const okBtn = document.getElementById('genericConfirmOkBtn');
+    const cancelBtn = document.getElementById('genericConfirmCancelBtn');
+
+    if (titleEl) titleEl.textContent = options.title || 'សូមបញ្ជាក់';
+    if (msgEl) msgEl.textContent = message;
+    if (okBtn) {
+      okBtn.textContent = options.okLabel || 'យល់ព្រម';
+      okBtn.className = `btn ${options.danger === false ? 'btn-primary' : 'btn-danger'}`;
+    }
+
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+
+    const cleanup = (result) => {
+      modal.classList.add('hidden');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      modal.removeEventListener('click', onBackdrop);
+      resolve(result);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onBackdrop = (e) => { if (e.target === modal) cleanup(false); };
+
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    modal.addEventListener('click', onBackdrop);
+  });
 }
 
 // DOM Elements
@@ -391,7 +429,7 @@ function handleFileUpload(file) {
     try {
       data = JSON.parse(xhr.responseText);
     } catch (err) {
-      alert(`Upload បរាជ័យ (HTTP ${xhr.status}): សូមពិនិត្យមើលទំហំឯកសារឡើងវិញ។`);
+      showToast(`Upload បរាជ័យ (HTTP ${xhr.status}): សូមពិនិត្យមើលទំហំឯកសារឡើងវិញ។`, 'error');
       previewCard.classList.add('hidden');
       dropzoneInner.classList.remove('hidden');
       return;
@@ -412,14 +450,14 @@ function handleFileUpload(file) {
       const emptyState = document.getElementById('emptyPlayerState');
       if (emptyState) emptyState.classList.add('hidden');
     } else {
-      alert('Upload បរាជ័យ: ' + (data.error || 'កំហុសមិនស្គាល់'));
+      showToast('Upload បរាជ័យ: ' + (data.error || 'កំហុសមិនស្គាល់'), 'error');
       previewCard.classList.add('hidden');
       dropzoneInner.classList.remove('hidden');
     }
   };
 
   xhr.onerror = () => {
-    alert('មិនអាចភ្ជាប់ទៅកាន់ Server បានទេ។');
+    showToast('មិនអាចភ្ជាប់ទៅកាន់ Server បានទេ។', 'error');
     previewCard.classList.add('hidden');
     dropzoneInner.classList.remove('hidden');
   };
@@ -446,7 +484,7 @@ function initDubbingActions() {
 
   toggleDubbed.addEventListener('click', () => {
     if (!dubbedMediaUrl) {
-      alert('មិនទាន់មានវីដេអូជាសំឡេងខ្មែរនៅឡើយទេ។ សូមចុច "ចាប់ផ្តើម Clone សំឡេង" ជាមុនសិន!');
+      showToast('មិនទាន់មានវីដេអូជាសំឡេងខ្មែរនៅឡើយទេ។ សូមចុច "ចាប់ផ្តើម Clone សំឡេង" ជាមុនសិន!', 'warning');
       return;
     }
     toggleDubbed.classList.add('active');
@@ -507,11 +545,11 @@ function initDubbingActions() {
         currentDubbingJobId = data.jobId;
         startPolling(data.jobId);
       } else {
-        alert('កំហុសពេលចាប់ផ្ដើមបញ្ជូលសំឡេង: ' + (data.error || ''));
+        showToast('កំហុសពេលចាប់ផ្ដើមបញ្ជូលសំឡេង: ' + (data.error || ''), 'error');
         startBtn.disabled = false;
       }
     } catch (err) {
-      alert('កំហុសដំណើរការបញ្ជូលសំឡេង: ' + err.message);
+      showToast('កំហុសដំណើរការបញ្ជូលសំឡេង: ' + err.message, 'error');
       startBtn.disabled = false;
     }
   });
@@ -623,11 +661,11 @@ function initCharacterLab() {
     const file = voiceSampleFile.files[0];
 
     if (!file) {
-      alert('សូមជ្រើសរើសឯកសារសំឡេងគំរូរបស់តួអង្គ (Sample Audio)!');
+      showToast('សូមជ្រើសរើសឯកសារសំឡេងគំរូរបស់តួអង្គ (Sample Audio)!', 'warning');
       return;
     }
     if (!text) {
-      alert('សូមសរសេរឃ្លាជាភាសាខ្មែរដែលចង់ឱ្យតួអង្គនិយាយ!');
+      showToast('សូមសរសេរឃ្លាជាភាសាខ្មែរដែលចង់ឱ្យតួអង្គនិយាយ!', 'warning');
       return;
     }
 
@@ -653,7 +691,7 @@ function initCharacterLab() {
 
       // Step B: Text to speech
       if (cloneData.isDemo) {
-        alert('🎉 ជោគជ័យក្នុងទម្រង់ Demo! សូមបញ្ចូល ElevenLabs API Key ក្នុង Settings ដើម្បីស្តាប់សំឡេង Live Voice Clone ផ្ទាល់។');
+        showToast('🎉 ជោគជ័យក្នុងទម្រង់ Demo! សូមបញ្ចូល ElevenLabs API Key ក្នុង Settings ដើម្បីស្តាប់សំឡេង Live Voice Clone ផ្ទាល់។', 'success');
         cloneBtn.disabled = false;
         cloneBtn.innerHTML = '<i data-lucide="volume-2"></i><span>Clone សំឡេង & បញ្ចេញសំឡេងខ្មែរភ្លាមៗ</span>';
         if (window.lucide) lucide.createIcons();
@@ -678,10 +716,10 @@ function initCharacterLab() {
         charAudioResultBox.classList.remove('hidden');
         charAudioPlayer.play();
       } else {
-        alert('កំហុសបញ្ចេញសំឡេង: ' + speakData.error);
+        showToast('កំហុសបញ្ចេញសំឡេង: ' + speakData.error, 'error');
       }
     } catch (err) {
-      alert('កំហុស៖ ' + err.message);
+      showToast('កំហុស៖ ' + err.message, 'error');
     } finally {
       cloneBtn.disabled = false;
       cloneBtn.innerHTML = '<i data-lucide="volume-2"></i><span>Clone សំឡេង & បញ្ចេញសំឡេងខ្មែរភ្លាមៗ</span>';
@@ -699,7 +737,7 @@ function initTranslator() {
   translateBtn.addEventListener('click', async () => {
     const text = input.value.trim();
     if (!text) {
-      alert('សូមបញ្ចូលឃ្លាសន្ទនាដើមជាមុនសិន!');
+      showToast('សូមបញ្ចូលឃ្លាសន្ទនាដើមជាមុនសិន!', 'warning');
       return;
     }
 
@@ -720,7 +758,7 @@ function initTranslator() {
       const data = await res.json();
       output.value = data.translated;
     } catch (err) {
-      alert('ការបកប្រែបរាជ័យ: ' + err.message);
+      showToast('ការបកប្រែបរាជ័យ: ' + err.message, 'error');
     } finally {
       translateBtn.disabled = false;
       translateBtn.innerHTML = '<i data-lucide="sparkles"></i><span>បកប្រែជាភាសាខ្មែរ</span>';
@@ -743,7 +781,7 @@ async function refreshOutputStorageStats() {
 }
 
 async function triggerClearOutputs() {
-  const confirmed = confirm('តើអ្នកពិតជាចង់សម្អាតឯកសារ Output ទាំងអស់ (វីដេអូ & សំឡេងកាត់តចាស់ៗ) ចេញពីកុំព្យូទ័រមែនទេ? សកម្មភាពនេះនឹងជួយសន្សំទំហំ Hard Disk របស់អ្នក។');
+  const confirmed = await showConfirmModal('តើអ្នកពិតជាចង់សម្អាតឯកសារ Output ទាំងអស់ (វីដេអូ & សំឡេងកាត់តចាស់ៗ) ចេញពីកុំព្យូទ័រមែនទេ? សកម្មភាពនេះនឹងជួយសន្សំទំហំ Hard Disk របស់អ្នក។');
   if (!confirmed) return;
 
   try {
@@ -1012,7 +1050,7 @@ function initManualStudio() {
 
   scanBtn.addEventListener('click', async () => {
     if (!currentUploadedFile) {
-      alert('សូមបញ្ចូលវីដេអូ ឬ File រឿងនៅ Tab ទី 1 ជាមុនសិន!');
+      showToast('សូមបញ្ចូលវីដេអូ ឬ File រឿងនៅ Tab ទី 1 ជាមុនសិន!', 'warning');
       const tab1 = document.querySelector('[data-tab="tab-dubbing"]');
       if (tab1) tab1.click();
       return;
@@ -1130,7 +1168,7 @@ function initManualStudio() {
       clearInterval(interpolator);
       clearInterval(scanPollInterval);
       clearInterval(scanTimerInterval);
-      alert('កំហុសស្កេនឃ្លាសន្ទនា: ' + err.message);
+      showToast('កំហុសស្កេនឃ្លាសន្ទនា: ' + err.message, 'error');
       loadingState.classList.add('hidden');
       emptyState.classList.remove('hidden');
     } finally {
@@ -1155,7 +1193,7 @@ function initManualStudio() {
   assembleBtn.addEventListener('click', async () => {
     const validLines = manualSegments.filter(s => s.audioUrl);
     if (validLines.length === 0) {
-      alert('សូមថតសំឡេង (Record) ឬបង្កើតសំឡេង AI យ៉ាងហោចណាស់មួយឃ្លា មុនពេលផ្គុំវីដេអូ!');
+      showToast('សូមថតសំឡេង (Record) ឬបង្កើតសំឡេង AI យ៉ាងហោចណាស់មួយឃ្លា មុនពេលផ្គុំវីដេអូ!', 'warning');
       return;
     }
 
@@ -1250,7 +1288,7 @@ function initManualStudio() {
   // Subtitle (.SRT) Export Functionality
   async function handleExportSrt() {
     if (!manualSegments || manualSegments.length === 0) {
-      alert('សូមស្កេន ឬបញ្ចូលឃ្លាសន្ទនាជាមុនសិន!');
+      showToast('សូមស្កេន ឬបញ្ចូលឃ្លាសន្ទនាជាមុនសិន!', 'warning');
       return;
     }
     try {
@@ -1613,7 +1651,7 @@ async function handleRecordLine(idx, btn, card) {
 
         updateManualStats();
       } catch (err) {
-        alert('កំហុសរក្សាទុកសំឡេងថត: ' + err.message);
+        showToast('កំហុសរក្សាទុកសំឡេងថត: ' + err.message, 'error');
       } finally {
         btn.disabled = false;
         btn.classList.remove('recording');
@@ -1632,7 +1670,7 @@ async function handleRecordLine(idx, btn, card) {
     }, 1000);
     recLabel.textContent = '⏹️ បញ្ឈប់ (00:00)';
   } catch (err) {
-    alert('មិនអាចបើក Microphone បានទេ: ' + err.message);
+    showToast('មិនអាចបើក Microphone បានទេ: ' + err.message, 'error');
   }
 }
 
@@ -1663,7 +1701,7 @@ async function handleUploadLineAudio(idx, file, card) {
 
     updateManualStats();
   } catch (err) {
-    alert('Upload សំឡេងបរាជ័យ: ' + err.message);
+    showToast('Upload សំឡេងបរាជ័យ: ' + err.message, 'error');
   }
 }
 
@@ -1676,7 +1714,7 @@ async function handleGenerateLineAI(idx, btn, card) {
   seg.khmer_translation = text;
 
   if (!text) {
-    alert('សូមបញ្ចូលអក្សរខ្មែរសម្រាប់ឃ្លានេះជាមុនសិន!');
+    showToast('សូមបញ្ចូលអក្សរខ្មែរសម្រាប់ឃ្លានេះជាមុនសិន!', 'warning');
     return;
   }
 
@@ -1720,7 +1758,7 @@ async function handleGenerateLineAI(idx, btn, card) {
 
     updateManualStats();
   } catch (err) {
-    alert('បង្កើតសំឡេង AI បរាជ័យ: ' + err.message);
+    showToast('បង្កើតសំឡេង AI បរាជ័យ: ' + err.message, 'error');
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<i data-lucide="sparkles"></i><span>AI និយាយ</span>';
@@ -2116,7 +2154,7 @@ async function handleSaveVoiceEdit() {
   const words = document.getElementById('editVoiceWords').value.trim();
 
   if (!label) {
-    alert('សូមបញ្ចូលឈ្មោះសំឡេងតួអង្គ!');
+    showToast('សូមបញ្ចូលឈ្មោះសំឡេងតួអង្គ!', 'warning');
     return;
   }
 
@@ -2170,12 +2208,12 @@ async function handleSaveNewVoice() {
   const words = document.getElementById('addVoiceWords').value.trim();
 
   if (!label) {
-    alert('សូមបញ្ចូលឈ្មោះសំឡេងតួអង្គថ្មី!');
+    showToast('សូមបញ្ចូលឈ្មោះសំឡេងតួអង្គថ្មី!', 'warning');
     return;
   }
 
   if (!fileInput.files || fileInput.files.length === 0) {
-    alert('សូមជ្រើសរើសឯកសារសំឡេង ឬវីដេអូសម្រាប់សំឡេងនេះ!');
+    showToast('សូមជ្រើសរើសឯកសារសំឡេង ឬវីដេអូសម្រាប់សំឡេងនេះ!', 'warning');
     return;
   }
 
@@ -2227,7 +2265,7 @@ window.deleteVoiceCard = async function(safeId) {
   const char = allVoiceCharacters.find(c => c.id === charId || c.filename === charId);
   const charName = char ? char.label : charId;
 
-  const confirmed = confirm(`តើអ្នកប្រាកដជាចង់លុបសំឡេង "${charName}" នេះចេញពីផ្ទាំងគ្រប់គ្រងមែនទេ?`);
+  const confirmed = await showConfirmModal(`តើអ្នកប្រាកដជាចង់លុបសំឡេង "${charName}" នេះចេញពីផ្ទាំងគ្រប់គ្រងមែនទេ?`);
   if (!confirmed) return;
 
   try {
@@ -2289,7 +2327,7 @@ async function handleRunTestSpeak() {
   const emotion = document.getElementById('testSpeakEmotion')?.value || 'dramatic';
 
   if (!text) {
-    alert('សូមសរសេរឃ្លាជាភាសាខ្មែរសម្រាប់ឱ្យតួអង្គនិយាយ!');
+    showToast('សូមសរសេរឃ្លាជាភាសាខ្មែរសម្រាប់ឱ្យតួអង្គនិយាយ!', 'warning');
     return;
   }
 
@@ -3584,7 +3622,7 @@ function initAuthAndRBAC() {
   // Handle Logout
   if (btnLogout) {
     btnLogout.addEventListener('click', async () => {
-      if (!confirm('តើអ្នកប្រាកដជាចង់ចាកចេញពីគណនីនេះមែនទេ?')) return;
+      if (!(await showConfirmModal('តើអ្នកប្រាកដជាចង់ចាកចេញពីគណនីនេះមែនទេ?'))) return;
       try {
         await fetch('/api/auth/logout', { method: 'POST' });
       } catch {}
@@ -3721,7 +3759,7 @@ function initAuthAndRBAC() {
       adminUsersTableBody.querySelectorAll('.btn-revoke-prem').forEach(btn => {
         btn.addEventListener('click', async () => {
           const uid = parseInt(btn.dataset.revokeid, 10);
-          if (!confirm(`តើអ្នកចង់ដក Premium ពី User #${uid} មែនទេ?`)) return;
+          if (!(await showConfirmModal(`តើអ្នកចង់ដក Premium ពី User #${uid} មែនទេ?`))) return;
           try {
             const r = await fetch('/api/admin/revoke-premium', {
               method: 'POST',
@@ -3740,7 +3778,7 @@ function initAuthAndRBAC() {
       adminUsersTableBody.querySelectorAll('.btn-delete-u').forEach(btn => {
         btn.addEventListener('click', async () => {
           const uid = parseInt(btn.dataset.deleteid, 10);
-          if (!confirm(`តើអ្នកប្រាកដជាចង់លុបគណនី User #${uid} នេះមែនទេ? សកម្មភាពនេះមិនអាចត្រឡប់វិញបានទេ។`)) return;
+          if (!(await showConfirmModal(`តើអ្នកប្រាកដជាចង់លុបគណនី User #${uid} នេះមែនទេ? សកម្មភាពនេះមិនអាចត្រឡប់វិញបានទេ។`, { okLabel: 'លុបគណនី' }))) return;
           try {
             const r = await fetch('/api/admin/delete-user', {
               method: 'POST',

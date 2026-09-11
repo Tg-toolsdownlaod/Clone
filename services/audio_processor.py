@@ -149,6 +149,43 @@ def remix_audio_with_effects(original_audio_path: str, dubbed_audio_path: str, o
         run_command(fallback_cmd)
         return output_path
 
+def concat_audio_with_pauses(clip_paths: list, pause_ms_list: list, output_path: str):
+    """
+    Stitch a sequence of short audio clips into one file, inserting a silent
+    "breath" gap of the requested duration between consecutive clips.
+    Used to reassemble a line that was synthesized clause-by-clause (each
+    clause with its own pitch/rate) into one natural-sounding utterance with
+    real pauses at punctuation, instead of one flat continuous TTS pass.
+
+    clip_paths: N audio file paths, one per clause, in speaking order.
+    pause_ms_list: N-1 pause durations (ms) to insert between each pair of clips.
+    """
+    if not clip_paths:
+        raise ValueError("concat_audio_with_pauses: no audio clips provided")
+
+    if len(clip_paths) == 1:
+        cmd = f'ffmpeg -nostdin -y -i "{clip_paths[0]}" -ar 44100 -ac 2 "{output_path}"'
+        run_command(cmd)
+        return output_path
+
+    inputs = []
+    filter_parts = []
+    labels = []
+    for i, clip_path in enumerate(clip_paths):
+        inputs.append(f'-i "{clip_path}"')
+        filter_parts.append(f'[{i}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a{i}]')
+        labels.append(f'[a{i}]')
+        if i < len(pause_ms_list):
+            pause_sec = max(0.0, pause_ms_list[i] / 1000.0)
+            if pause_sec > 0:
+                filter_parts.append(f'anullsrc=r=44100:cl=stereo,atrim=duration={pause_sec:.3f}[s{i}]')
+                labels.append(f'[s{i}]')
+
+    filter_complex = ';'.join(filter_parts) + ';' + ''.join(labels) + f'concat=n={len(labels)}:v=0:a=1[outa]'
+    cmd = f'ffmpeg -nostdin -y {" ".join(inputs)} -filter_complex "{filter_complex}" -map "[outa]" -ar 44100 -ac 2 "{output_path}"'
+    run_command(cmd)
+    return output_path
+
 def tune_audio_pitch_and_speed(input_audio_path: str, output_path: str, speed: float = 1.0, pitch_semitones: int = 0):
     """Adjust voice pitch & speed for precise lip-sync & character tone tuning."""
     clamped_speed = max(0.5, min(2.0, float(speed) if speed else 1.0))
