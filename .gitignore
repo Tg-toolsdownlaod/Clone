@@ -11,6 +11,10 @@ uploads/*
 !uploads/.gitkeep
 outputs/*
 !outputs/.gitkeep
+simple_studio/data/uploads/*
+!simple_studio/data/uploads/.gitkeep
+simple_studio/data/outputs/*
+!simple_studio/data/outputs/.gitkeep
 
 # Temporary & Scratch scripts
 scratch/

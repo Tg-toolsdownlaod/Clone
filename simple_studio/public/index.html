@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KhmerDub AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="top-bar">
+    <div class="brand">
+      <span class="brand-icon">🎬</span>
+      <span class="brand-name">KhmerDub <b>AI</b></span>
+    </div>
+    <span class="brand-tag">បញ្ចូលឯកសារ ➜ ទទួលបានសំឡេងខ្មែរ</span>
+  </header>
+
+  <main class="page">
+    <section class="card" id="uploadCard">
+      <h1>ដាក់សំឡេងខ្មែរស្វ័យប្រវត្តិ</h1>
+      <p class="subtitle">អូសទម្លាក់ វីដេអូ ឬ សំឡេង មួយឯកសារ AI នឹងបកប្រែ និងដាក់សំឡេងខ្មែរឱ្យដោយស្វ័យប្រវត្តិ</p>
+
+      <label class="dropzone" id="dropzone" for="fileInput">
+        <div class="dropzone-icon">📁</div>
+        <div class="dropzone-text">អូសទម្លាក់ឯកសារនៅទីនេះ</div>
+        <div class="dropzone-sub">ឬចុចទីនេះដើម្បីជ្រើសរើសឯកសារ</div>
+        <div class="dropzone-formats">MP4 · MKV · MOV · WEBM · MP3 · WAV · M4A</div>
+        <input type="file" id="fileInput" accept=".mp4,.mkv,.mov,.avi,.webm,.mp3,.wav,.m4a,.aac" hidden>
+      </label>
+
+      <div class="file-picked hidden" id="filePicked">
+        <div class="file-picked-info">
+          <span class="file-icon" id="filePickedIcon">🎞️</span>
+          <div>
+            <div class="file-picked-name" id="filePickedName"></div>
+            <div class="file-picked-size" id="filePickedSize"></div>
+          </div>
+        </div>
+        <div class="file-picked-actions">
+          <button class="btn btn-ghost" id="changeFileBtn" type="button">ប្តូរឯកសារ</button>
+          <button class="btn btn-primary" id="startBtn" type="button">ចាប់ផ្តើមដាប់សំឡេងខ្មែរ</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card hidden" id="progressCard">
+      <div class="progress-ring-wrap">
+        <svg class="progress-ring" viewBox="0 0 120 120">
+          <circle class="progress-ring-bg" cx="60" cy="60" r="52"></circle>
+          <circle class="progress-ring-fg" id="progressRingFg" cx="60" cy="60" r="52"></circle>
+        </svg>
+        <div class="progress-ring-label" id="progressPercent">0%</div>
+      </div>
+      <div class="progress-message" id="progressMessage">កំពុងរង់ចាំចាប់ផ្តើម...</div>
+      <div class="progress-hint">សូមកុំបិទទំព័រនេះ — ដំណើរការនេះអាចចំណាយពេលពីរបីនាទី អាស្រ័យលើប្រវែងឯកសារ</div>
+    </section>
+
+    <section class="card hidden" id="resultCard">
+      <div class="result-badge">🎉 ជោគជ័យ!</div>
+      <div class="media-preview" id="mediaPreview"></div>
+
+      <div class="result-actions">
+        <a class="btn btn-primary" id="downloadBtn" href="#" download>⬇️ ទាញយកឯកសារ</a>
+        <button class="btn btn-ghost" id="scriptToggleBtn" type="button">📜 មើលអត្ថបទសម្តី</button>
+        <button class="btn btn-ghost" id="newFileBtn" type="button">🔄 ដាក់ឯកសារថ្មី</button>
+      </div>
+
+      <pre class="script-box hidden" id="scriptBox"></pre>
+    </section>
+
+    <section class="card hidden" id="errorCard">
+      <div class="error-badge">⚠️ មានបញ្ហា</div>
+      <div class="error-message" id="errorMessage"></div>
+      <button class="btn btn-primary" id="retryBtn" type="button">ព្យាយាមម្តងទៀត</button>
+    </section>
+  </main>
+
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
