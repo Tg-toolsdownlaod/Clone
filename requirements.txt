@@ -10,4 +10,5 @@ google-genai>=0.1.0
 demucs>=4.0.0
 numpy>=1.26.0
 scipy>=1.13.0
+yt-dlp>=2024.12.13
 

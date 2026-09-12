@@ -14,6 +14,8 @@ import sys
 import uuid
 import json
 import shutil
+import asyncio
+import subprocess
 import traceback
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -171,6 +173,77 @@ async def run_job(job_id: str, input_path: str, ref_voice_path: str = None):
         job['status'] = 'error'
         job['error'] = str(e)
         job['message'] = f'កំហុស: {e}'
+
+
+def download_video_from_url(url: str, dest_dir: str) -> str:
+    """Download a video/audio from a public link (YouTube, TikTok, Facebook, etc.)
+    using yt-dlp. Runs with an explicit argument list (never shell=True) so the
+    user-supplied URL can never be interpreted as shell syntax."""
+    output_template = os.path.join(dest_dir, '%(id)s.%(ext)s')
+    cmd = [
+        'yt-dlp',
+        '-f', 'bv*+ba/b',
+        '--merge-output-format', 'mp4',
+        '--no-playlist',
+        '-o', output_template,
+        url,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        raise RuntimeError(f'ទាញយកវីដេអូបានបរាជ័យ: {result.stderr[-300:].strip()}')
+
+    files = [f for f in os.listdir(dest_dir) if not f.startswith('.')]
+    if not files:
+        raise RuntimeError('ទាញយកវីដេអូបានបរាជ័យ (Link មិនត្រូវបានគាំទ្រ ឬឯកសារឯកជន)')
+    files.sort(key=lambda f: os.path.getmtime(os.path.join(dest_dir, f)), reverse=True)
+    return os.path.join(dest_dir, files[0])
+
+
+async def run_download_and_dub(job_id: str, url: str, ref_voice_path: str = None):
+    job = jobs[job_id]
+    try:
+        job['status'] = 'processing'
+        job['progress'] = 2
+        job['message'] = 'កំពុងទាញយកវីដេអូពី Link... (អាចចំណាយពេលបន្តិច)'
+        dl_dir = os.path.join(UPLOAD_DIR, f"dl_{job_id}")
+        os.makedirs(dl_dir, exist_ok=True)
+        video_path = await asyncio.to_thread(download_video_from_url, url, dl_dir)
+        job['progress'] = 5
+        job['message'] = 'ទាញយកជោគជ័យ! កំពុងចាប់ផ្តើមវិភាគ...'
+    except Exception as e:
+        traceback.print_exc()
+        job['status'] = 'error'
+        job['error'] = str(e)
+        job['message'] = f'កំហុសទាញយក: {e}'
+        return
+
+    await run_job(job_id, video_path, ref_voice_path)
+
+
+@app.post('/api/dub/from-url')
+async def start_dub_from_url(background_tasks: BackgroundTasks, url: str = Form(...), voiceId: str = Form(None)):
+    clean_url = (url or '').strip()
+    if not clean_url.lower().startswith(('http://', 'https://')):
+        raise HTTPException(status_code=400, detail='Link មិនត្រឹមត្រូវទេ (ត្រូវចាប់ផ្តើមដោយ http:// ឬ https://)')
+
+    ref_voice_path = None
+    if voiceId:
+        match = next((v for v in load_voices() if v['id'] == voiceId), None)
+        if match:
+            ref_voice_path = os.path.join(VOICES_DIR, match['filename'])
+
+    job_id = uuid.uuid4().hex[:10]
+    jobs[job_id] = {
+        'status': 'queued',
+        'progress': 0,
+        'message': 'កំពុងរង់ចាំចាប់ផ្តើមទាញយក...',
+        'mediaType': None,
+        'outputUrl': None,
+        'script': None,
+        'error': None,
+    }
+    background_tasks.add_task(run_download_and_dub, job_id, clean_url, ref_voice_path)
+    return {'jobId': job_id}
 
 
 @app.post('/api/dub')

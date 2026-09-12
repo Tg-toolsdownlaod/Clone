@@ -24,6 +24,17 @@
       <h1>ដាក់សំឡេងខ្មែរស្វ័យប្រវត្តិ</h1>
       <p class="subtitle">អូសទម្លាក់ វីដេអូ ឬ សំឡេង មួយឯកសារ AI នឹងបកប្រែ និងដាក់សំឡេងខ្មែរឱ្យដោយស្វ័យប្រវត្តិ</p>
 
+      <div class="voice-picker">
+        <label for="voiceSelect">🎙️ សំឡេងតួសម្តែង</label>
+        <div class="voice-picker-row">
+          <select id="voiceSelect" class="voice-select">
+            <option value="">🤖 ស្វ័យប្រវត្តិ (AI ជ្រើសរើសសំឡេងតួអង្គដោយខ្លួនឯង)</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" id="openVoiceLibBtn" type="button">🎙️ គ្រប់គ្រងសំឡេងគំរូ</button>
+        </div>
+        <div class="voice-picker-hint">ទុកនៅ "ស្វ័យប្រវត្តិ" ដើម្បីឱ្យ AI សម្គាល់ និងចាត់តាំងសំឡេងតួអង្គនីមួយៗខ្លួនឯង ឬជ្រើសរើសសំឡេងគំរូមួយ ដើម្បីប្រើសំឡេងតែមួយសម្រាប់គ្រប់ការនិយាយ</div>
+      </div>
+
       <label class="dropzone" id="dropzone" for="fileInput">
         <div class="dropzone-icon">📁</div>
         <div class="dropzone-text">អូសទម្លាក់ឯកសារនៅទីនេះ</div>
@@ -32,6 +43,13 @@
         <input type="file" id="fileInput" accept=".mp4,.mkv,.mov,.avi,.webm,.mp3,.wav,.m4a,.aac" hidden>
       </label>
 
+      <div class="or-divider"><span>ឬ</span></div>
+
+      <div class="url-input-row">
+        <input type="url" id="videoUrlInput" placeholder="បិទភ្ជាប់ Link វីដេអូ (TikTok / YouTube / Facebook...)">
+        <button class="btn btn-primary" id="urlDubBtn" type="button">⬇️ ទាញយក & ដាប់</button>
+      </div>
+
       <div class="file-picked hidden" id="filePicked">
         <div class="file-picked-info">
           <span class="file-icon" id="filePickedIcon">🎞️</span>
@@ -39,17 +57,6 @@
             <div class="file-picked-name" id="filePickedName"></div>
             <div class="file-picked-size" id="filePickedSize"></div>
           </div>
-        </div>
-
-        <div class="voice-picker">
-          <label for="voiceSelect">🎙️ សំឡេងតួសម្តែង</label>
-          <div class="voice-picker-row">
-            <select id="voiceSelect" class="voice-select">
-              <option value="">🤖 ស្វ័យប្រវត្តិ (AI ជ្រើសរើសសំឡេងតួអង្គដោយខ្លួនឯង)</option>
-            </select>
-            <button class="btn btn-ghost btn-sm" id="openVoiceLibBtn" type="button">🎙️ គ្រប់គ្រងសំឡេងគំរូ</button>
-          </div>
-          <div class="voice-picker-hint">ទុកនៅ "ស្វ័យប្រវត្តិ" ដើម្បីឱ្យ AI សម្គាល់ និងចាត់តាំងសំឡេងតួអង្គនីមួយៗខ្លួនឯង ឬជ្រើសរើសសំឡេងគំរូមួយ ដើម្បីប្រើសំឡេងតែមួយសម្រាប់គ្រប់ការនិយាយ</div>
         </div>
 
         <div class="file-picked-actions">

@@ -30,6 +30,9 @@ const els = {
 
   toastContainer: document.getElementById('toastContainer'),
 
+  videoUrlInput: document.getElementById('videoUrlInput'),
+  urlDubBtn: document.getElementById('urlDubBtn'),
+
   voiceSelect: document.getElementById('voiceSelect'),
   openVoiceLibBtn: document.getElementById('openVoiceLibBtn'),
   voiceLibModal: document.getElementById('voiceLibModal'),
@@ -118,6 +121,19 @@ els.startBtn.addEventListener('click', () => {
   startDubbing(selectedFile);
 });
 
+els.urlDubBtn.addEventListener('click', () => {
+  const url = els.videoUrlInput.value.trim();
+  if (!url) {
+    showToast('សូមបិទភ្ជាប់ Link វីដេអូជាមុនសិន', 'warning');
+    return;
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    showToast('Link មិនត្រឹមត្រូវទេ (ត្រូវចាប់ផ្តើមដោយ http:// ឬ https://)', 'warning');
+    return;
+  }
+  startDubbingFromUrl(url);
+});
+
 els.newFileBtn.addEventListener('click', resetToUpload);
 els.retryBtn.addEventListener('click', resetToUpload);
 
@@ -129,6 +145,7 @@ function resetToUpload() {
   clearInterval(pollTimer);
   selectedFile = null;
   els.fileInput.value = '';
+  els.videoUrlInput.value = '';
   els.filePicked.classList.add('hidden');
   setProgress(0, 'កំពុងរង់ចាំចាប់ផ្តើម...');
   showCard('upload');
@@ -151,6 +168,25 @@ async function startDubbing(file) {
     pollStatus(jobId);
   } catch (err) {
     showError(err.message || 'ការបញ្ជូនឯកសារបរាជ័យ');
+  }
+}
+
+async function startDubbingFromUrl(url) {
+  showCard('progress');
+  setProgress(0, 'កំពុងទាញយកវីដេអូពី Link...');
+
+  try {
+    const formData = new FormData();
+    formData.append('url', url);
+    if (els.voiceSelect.value) {
+      formData.append('voiceId', els.voiceSelect.value);
+    }
+    const res = await fetch('/api/dub/from-url', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'ទាញយកវីដេអូបរាជ័យ');
+    pollStatus(data.jobId);
+  } catch (err) {
+    showError(err.message || 'ទាញយកវីដេអូបរាជ័យ');
   }
 }
 
