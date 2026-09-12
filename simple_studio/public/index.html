@@ -40,6 +40,18 @@
             <div class="file-picked-size" id="filePickedSize"></div>
           </div>
         </div>
+
+        <div class="voice-picker">
+          <label for="voiceSelect">🎙️ សំឡេងតួសម្តែង</label>
+          <div class="voice-picker-row">
+            <select id="voiceSelect" class="voice-select">
+              <option value="">🤖 ស្វ័យប្រវត្តិ (AI ជ្រើសរើសសំឡេងតួអង្គដោយខ្លួនឯង)</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" id="openVoiceLibBtn" type="button">🎙️ គ្រប់គ្រងសំឡេងគំរូ</button>
+          </div>
+          <div class="voice-picker-hint">ទុកនៅ "ស្វ័យប្រវត្តិ" ដើម្បីឱ្យ AI សម្គាល់ និងចាត់តាំងសំឡេងតួអង្គនីមួយៗខ្លួនឯង ឬជ្រើសរើសសំឡេងគំរូមួយ ដើម្បីប្រើសំឡេងតែមួយសម្រាប់គ្រប់ការនិយាយ</div>
+        </div>
+
         <div class="file-picked-actions">
           <button class="btn btn-ghost" id="changeFileBtn" type="button">ប្តូរឯកសារ</button>
           <button class="btn btn-primary" id="startBtn" type="button">ចាប់ផ្តើមដាប់សំឡេងខ្មែរ</button>
@@ -78,6 +90,33 @@
       <button class="btn btn-primary" id="retryBtn" type="button">ព្យាយាមម្តងទៀត</button>
     </section>
   </main>
+
+  <div class="modal-overlay hidden" id="voiceLibModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2>🎙️ សំឡេងគំរូតួអង្គ</h2>
+        <button class="modal-close-btn" id="closeVoiceLibBtn" type="button">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <p class="modal-hint">បញ្ចូលសំឡេងគំរូតួអង្គផ្សេងៗទុក ដើម្បីប្រើឡើងវិញនៅពេលក្រោយ — AI នឹងចម្លងសម្លេង (Zero-Shot Clone) ពីគំរូនេះ ជំនួសឱ្យសម្គាល់ដោយខ្លួនឯង។</p>
+
+        <form id="addVoiceForm" class="add-voice-form">
+          <input type="text" id="newVoiceLabel" placeholder="ឈ្មោះតួអង្គ (ឧ. តួឯកប្រុស, សម្លេងឪពុក...)" required>
+          <div class="add-voice-file-row">
+            <label class="btn btn-ghost btn-sm file-pick-label" for="newVoiceFile">📎 ជ្រើសរើសឯកសារសំឡេង</label>
+            <input type="file" id="newVoiceFile" accept=".mp3,.wav,.m4a,.aac,.ogg" hidden required>
+            <span class="add-voice-filename" id="newVoiceFilename">មិនទាន់ជ្រើសរើសទេ</span>
+          </div>
+          <button class="btn btn-primary btn-sm" type="submit">➕ បន្ថែមចូលបញ្ជី</button>
+        </form>
+
+        <div class="voice-list" id="voiceList">
+          <div class="voice-list-empty" id="voiceListEmpty">មិនទាន់មានសំឡេងគំរូនៅឡើយទេ</div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="toast-container" id="toastContainer"></div>
 

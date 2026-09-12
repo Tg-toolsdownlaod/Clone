@@ -29,6 +29,17 @@ const els = {
   retryBtn: document.getElementById('retryBtn'),
 
   toastContainer: document.getElementById('toastContainer'),
+
+  voiceSelect: document.getElementById('voiceSelect'),
+  openVoiceLibBtn: document.getElementById('openVoiceLibBtn'),
+  voiceLibModal: document.getElementById('voiceLibModal'),
+  closeVoiceLibBtn: document.getElementById('closeVoiceLibBtn'),
+  addVoiceForm: document.getElementById('addVoiceForm'),
+  newVoiceLabel: document.getElementById('newVoiceLabel'),
+  newVoiceFile: document.getElementById('newVoiceFile'),
+  newVoiceFilename: document.getElementById('newVoiceFilename'),
+  voiceList: document.getElementById('voiceList'),
+  voiceListEmpty: document.getElementById('voiceListEmpty'),
 };
 
 let selectedFile = null;
@@ -147,6 +158,9 @@ function uploadFile(file) {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
     formData.append('file', file);
+    if (els.voiceSelect.value) {
+      formData.append('voiceId', els.voiceSelect.value);
+    }
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/dub', true);
@@ -225,3 +239,122 @@ function showError(message) {
   showCard('error');
   showToast(message, 'error');
 }
+
+// ----------------------------------------------------
+// Voice Library — add/list/delete reusable character voice samples
+// ----------------------------------------------------
+let cachedVoices = [];
+
+async function loadVoices() {
+  try {
+    const res = await fetch('/api/voices');
+    if (!res.ok) throw new Error('Failed to load voices');
+    cachedVoices = await res.json();
+    renderVoiceSelect();
+    renderVoiceList();
+  } catch (err) {
+    console.error('loadVoices error:', err);
+  }
+}
+
+function renderVoiceSelect() {
+  const currentValue = els.voiceSelect.value;
+  els.voiceSelect.innerHTML = '<option value="">🤖 ស្វ័យប្រវត្តិ (AI ជ្រើសរើសសំឡេងតួអង្គដោយខ្លួនឯង)</option>';
+  cachedVoices.forEach((v) => {
+    const opt = document.createElement('option');
+    opt.value = v.id;
+    opt.textContent = `🎙️ ${v.label}`;
+    els.voiceSelect.appendChild(opt);
+  });
+  if (cachedVoices.some((v) => v.id === currentValue)) {
+    els.voiceSelect.value = currentValue;
+  }
+}
+
+function renderVoiceList() {
+  els.voiceList.querySelectorAll('.voice-list-item').forEach((el) => el.remove());
+  els.voiceListEmpty.classList.toggle('hidden', cachedVoices.length > 0);
+
+  cachedVoices.forEach((v) => {
+    const item = document.createElement('div');
+    item.className = 'voice-list-item';
+    item.innerHTML = `
+      <span class="voice-list-item-label">${escapeHtml(v.label)}</span>
+      <audio controls src="${v.url}"></audio>
+      <button class="voice-list-item-delete" type="button" title="លុប" data-id="${v.id}">🗑️</button>
+    `;
+    item.querySelector('.voice-list-item-delete').addEventListener('click', () => deleteVoice(v.id));
+    els.voiceList.appendChild(item);
+  });
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+async function deleteVoice(voiceId) {
+  try {
+    const res = await fetch(`/api/voices/${voiceId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete failed');
+    showToast('បានលុបសំឡេងគំរូរួចរាល់', 'info');
+    await loadVoices();
+  } catch (err) {
+    showToast('លុបសំឡេងគំរូបរាជ័យ', 'error');
+  }
+}
+
+els.openVoiceLibBtn.addEventListener('click', () => {
+  els.voiceLibModal.classList.remove('hidden');
+  loadVoices();
+});
+els.closeVoiceLibBtn.addEventListener('click', () => {
+  els.voiceLibModal.classList.add('hidden');
+});
+els.voiceLibModal.addEventListener('click', (e) => {
+  if (e.target === els.voiceLibModal) els.voiceLibModal.classList.add('hidden');
+});
+
+els.newVoiceFile.addEventListener('change', () => {
+  const file = els.newVoiceFile.files && els.newVoiceFile.files[0];
+  els.newVoiceFilename.textContent = file ? file.name : 'មិនទាន់ជ្រើសរើសទេ';
+});
+
+els.addVoiceForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const label = els.newVoiceLabel.value.trim();
+  const file = els.newVoiceFile.files && els.newVoiceFile.files[0];
+  if (!label) {
+    showToast('សូមបញ្ចូលឈ្មោះតួអង្គជាមុនសិន', 'warning');
+    return;
+  }
+  if (!file) {
+    showToast('សូមជ្រើសរើសឯកសារសំឡេងជាមុនសិន', 'warning');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('label', label);
+  formData.append('file', file);
+
+  const submitBtn = els.addVoiceForm.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+  try {
+    const res = await fetch('/api/voices', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'បន្ថែមសំឡេងគំរូបរាជ័យ');
+
+    showToast(`បានបន្ថែមសំឡេងគំរូ "${data.label}" ជោគជ័យ!`, 'success');
+    els.addVoiceForm.reset();
+    els.newVoiceFilename.textContent = 'មិនទាន់ជ្រើសរើសទេ';
+    await loadVoices();
+  } catch (err) {
+    showToast(err.message || 'បន្ថែមសំឡេងគំរូបរាជ័យ', 'error');
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+
+// Populate the dropdown on the main upload card as soon as the page loads
+loadVoices();

@@ -15,6 +15,8 @@ simple_studio/data/uploads/*
 !simple_studio/data/uploads/.gitkeep
 simple_studio/data/outputs/*
 !simple_studio/data/outputs/.gitkeep
+simple_studio/data/voices/*
+!simple_studio/data/voices/.gitkeep
 
 # Temporary & Scratch scripts
 scratch/
