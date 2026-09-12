@@ -2622,6 +2622,9 @@ select.form-input:focus {
 .toast-item.info {
   border-left: 4px solid var(--accent-cyan);
 }
+.toast-item.warning {
+  border-left: 4px solid var(--accent-amber);
+}
 
 @keyframes slideInToast {
   from {
