@@ -62,9 +62,13 @@ LOCAL_ADMIN_USER = {'id': 0, 'username': 'local', 'role': 'admin', 'tier': 'prem
 def get_request_user(request: Request) -> Optional[dict]:
     """Retrieve validated user from Authorization Bearer token or headers.
 
-    When DISABLE_LOGIN is active, every request is treated as an already
-    logged-in admin/premium user unless a real token is presented, so the
-    Studio works fully without ever showing the login screen."""
+    When DISABLE_LOGIN is active, every request is unconditionally treated as
+    an already logged-in admin/premium user — even a real, already-logged-in
+    free-tier session is overridden — so the Studio always has full access
+    with the login screen never appearing."""
+    if DISABLE_LOGIN:
+        return LOCAL_ADMIN_USER
+
     auth_header = request.headers.get('Authorization', '')
     token = ''
     if auth_header.startswith('Bearer '):
@@ -74,11 +78,7 @@ def get_request_user(request: Request) -> Optional[dict]:
     if not token:
         token = request.query_params.get('token', '')
 
-    user = auth_db.get_user_by_token(token) if token else None
-    if user:
-        return user
-
-    return LOCAL_ADMIN_USER if DISABLE_LOGIN else None
+    return auth_db.get_user_by_token(token) if token else None
 
 def require_admin(request: Request) -> dict:
     """Ensure current user is authenticated and has admin role."""
