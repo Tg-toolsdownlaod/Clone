@@ -4,7 +4,7 @@ chcp 65001 > nul
 cd /d "%~dp0"
 
 echo ====================================================================
-echo 🚀 ចាប់ផ្តើម Local VoxCPM2 Engine លើកុំព្យូទ័រផ្ទាល់ (Port 8000)
+echo Starting Local VoxCPM2 Engine on this computer (Port 8000)
 echo ====================================================================
 echo.
 
