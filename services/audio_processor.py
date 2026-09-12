@@ -186,6 +186,25 @@ def concat_audio_with_pauses(clip_paths: list, pause_ms_list: list, output_path:
     run_command(cmd)
     return output_path
 
+def master_vocal_track(input_path: str, output_path: str):
+    """
+    Clean up and add character to a raw user-recorded voice so it reads as a
+    finished dub instead of a phone-mic recording: noise-floor reduction,
+    rumble removal, a light warmth/presence EQ lift, and gentle compression +
+    limiting for consistent, full-bodied loudness.
+    """
+    filters = (
+        "afftdn=nf=-25,"
+        "highpass=f=90,"
+        "equalizer=f=200:width_type=o:w=1.5:g=2,"
+        "equalizer=f=4500:width_type=o:w=1.5:g=2,"
+        "acompressor=threshold=0.08:ratio=3:attack=8:release=200:makeup=2,"
+        "alimiter=limit=0.95"
+    )
+    cmd = f'ffmpeg -nostdin -y -i "{input_path}" -af "{filters}" -ar 44100 -ac 2 "{output_path}"'
+    run_command(cmd)
+    return output_path
+
 def tune_audio_pitch_and_speed(input_audio_path: str, output_path: str, speed: float = 1.0, pitch_semitones: int = 0):
     """Adjust voice pitch & speed for precise lip-sync & character tone tuning."""
     clamped_speed = max(0.5, min(2.0, float(speed) if speed else 1.0))

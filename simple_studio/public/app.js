@@ -33,6 +33,19 @@ const els = {
   videoUrlInput: document.getElementById('videoUrlInput'),
   urlDubBtn: document.getElementById('urlDubBtn'),
 
+  modeTabAuto: document.getElementById('modeTabAuto'),
+  modeTabMyVoice: document.getElementById('modeTabMyVoice'),
+  autoModeSection: document.getElementById('autoModeSection'),
+  myVoiceModeSection: document.getElementById('myVoiceModeSection'),
+
+  myVoiceVideoDropzone: document.getElementById('myVoiceVideoDropzone'),
+  myVoiceVideoInput: document.getElementById('myVoiceVideoInput'),
+  myVoiceVideoText: document.getElementById('myVoiceVideoText'),
+  myVoiceAudioDropzone: document.getElementById('myVoiceAudioDropzone'),
+  myVoiceAudioInput: document.getElementById('myVoiceAudioInput'),
+  myVoiceAudioText: document.getElementById('myVoiceAudioText'),
+  myVoiceStartBtn: document.getElementById('myVoiceStartBtn'),
+
   voiceSelect: document.getElementById('voiceSelect'),
   openVoiceLibBtn: document.getElementById('openVoiceLibBtn'),
   voiceLibModal: document.getElementById('voiceLibModal'),
@@ -147,6 +160,15 @@ function resetToUpload() {
   els.fileInput.value = '';
   els.videoUrlInput.value = '';
   els.filePicked.classList.add('hidden');
+
+  myVoiceVideoFile = null;
+  myVoiceAudioFile = null;
+  els.myVoiceVideoInput.value = '';
+  els.myVoiceAudioInput.value = '';
+  els.myVoiceVideoText.textContent = 'ជំហានទី ១ — អូសទម្លាក់ ឬ ជ្រើសរើសវីដេអូ';
+  els.myVoiceAudioText.textContent = 'ជំហានទី ២ — អូសទម្លាក់ ឬ ជ្រើសរើសសំឡេងដែលអ្នកបានថត';
+  els.myVoiceStartBtn.disabled = true;
+
   setProgress(0, 'កំពុងរង់ចាំចាប់ផ្តើម...');
   showCard('upload');
 }
@@ -394,3 +416,110 @@ els.addVoiceForm.addEventListener('submit', async (e) => {
 
 // Populate the dropdown on the main upload card as soon as the page loads
 loadVoices();
+
+// ----------------------------------------------------
+// Mode switcher — Auto AI dubbing vs. Replace with My Own Voice
+// ----------------------------------------------------
+function setMode(mode) {
+  const isMyVoice = mode === 'myvoice';
+  els.modeTabAuto.classList.toggle('active', !isMyVoice);
+  els.modeTabMyVoice.classList.toggle('active', isMyVoice);
+  els.autoModeSection.classList.toggle('hidden', isMyVoice);
+  els.myVoiceModeSection.classList.toggle('hidden', !isMyVoice);
+}
+els.modeTabAuto.addEventListener('click', () => setMode('auto'));
+els.modeTabMyVoice.addEventListener('click', () => setMode('myvoice'));
+
+// ----------------------------------------------------
+// "My Own Voice" redub flow — clean + master a user's own recording,
+// then mix it into their video in place of the original speech.
+// ----------------------------------------------------
+let myVoiceVideoFile = null;
+let myVoiceAudioFile = null;
+
+function updateMyVoiceStartBtn() {
+  els.myVoiceStartBtn.disabled = !(myVoiceVideoFile && myVoiceAudioFile);
+}
+
+function wireDropzone(dropzone, input, onPick) {
+  ['dragenter', 'dragover'].forEach((evt) => {
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.add('dragover');
+    });
+  });
+  ['dragleave', 'drop'].forEach((evt) => {
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('dragover');
+    });
+  });
+  dropzone.addEventListener('drop', (e) => {
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) onPick(file);
+  });
+  input.addEventListener('change', () => {
+    if (input.files && input.files[0]) onPick(input.files[0]);
+  });
+}
+
+wireDropzone(els.myVoiceVideoDropzone, els.myVoiceVideoInput, (file) => {
+  myVoiceVideoFile = file;
+  els.myVoiceVideoText.textContent = `✅ ${file.name}`;
+  updateMyVoiceStartBtn();
+});
+
+wireDropzone(els.myVoiceAudioDropzone, els.myVoiceAudioInput, (file) => {
+  myVoiceAudioFile = file;
+  els.myVoiceAudioText.textContent = `✅ ${file.name}`;
+  updateMyVoiceStartBtn();
+});
+
+els.myVoiceStartBtn.addEventListener('click', () => {
+  if (!myVoiceVideoFile || !myVoiceAudioFile) return;
+  startVoiceRedub(myVoiceVideoFile, myVoiceAudioFile);
+});
+
+async function startVoiceRedub(videoFile, audioFile) {
+  showCard('progress');
+  setProgress(0, 'កំពុងបញ្ជូនឯកសារ...');
+
+  try {
+    const formData = new FormData();
+    formData.append('video', videoFile);
+    formData.append('voice', audioFile);
+
+    const jobId = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/redub', true);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const uploadPct = Math.round((e.loaded / e.total) * 100);
+          setProgress(Math.round(uploadPct * 0.05), `កំពុងបញ្ជូនឯកសារ... ${uploadPct}%`);
+        }
+      };
+      xhr.onload = () => {
+        let data;
+        try {
+          data = JSON.parse(xhr.responseText);
+        } catch (e) {
+          reject(new Error('ការឆ្លើយតបពី Server មិនត្រឹមត្រូវ'));
+          return;
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && data.jobId) {
+          resolve(data.jobId);
+        } else {
+          reject(new Error(data.detail || 'ការបញ្ជូនឯកសារបរាជ័យ'));
+        }
+      };
+      xhr.onerror = () => reject(new Error('មិនអាចភ្ជាប់ទៅ Server បានទេ'));
+      xhr.send(formData);
+    });
+
+    pollStatus(jobId);
+  } catch (err) {
+    showError(err.message || 'ការបញ្ជូនឯកសារបរាជ័យ');
+  }
+}

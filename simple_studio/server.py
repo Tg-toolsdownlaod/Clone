@@ -31,6 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from services.khmer_dubber import KhmerDubber
 from services import audio_processor
+from services import vocal_separator
 
 UPLOAD_DIR = os.path.join(APP_DIR, 'data', 'uploads')
 OUTPUT_DIR = os.path.join(APP_DIR, 'data', 'outputs')
@@ -173,6 +174,86 @@ async def run_job(job_id: str, input_path: str, ref_voice_path: str = None):
         job['status'] = 'error'
         job['error'] = str(e)
         job['message'] = f'កំហុស: {e}'
+
+
+async def run_voice_redub_job(job_id: str, video_path: str, voice_path: str):
+    """Clean a user's own recorded voice, add character, and mix it into their
+    video in place of the original speech — the original video's background
+    music/effects are preserved via the same ducking mix used elsewhere."""
+    job = jobs[job_id]
+    job_dir = os.path.join(OUTPUT_DIR, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+
+    def on_progress(pct, msg):
+        job['progress'] = pct
+        job['message'] = msg
+        job['status'] = 'processing'
+
+    try:
+        job['status'] = 'processing'
+        on_progress(5, 'កំពុងស្រង់សំឡេងដើមចេញពីវីដេអូ (សម្រាប់ភ្លេងកំដរ)...')
+        original_audio_path = os.path.join(job_dir, 'original_audio.mp3')
+        audio_processor.extract_audio(video_path, original_audio_path)
+
+        on_progress(20, 'កំពុងសម្អាតសំឡេងថតរបស់អ្នក (កម្ចាត់សំឡេងរំខាន)...')
+        clean_dir = os.path.join(job_dir, 'clean')
+        sep_result = await asyncio.to_thread(vocal_separator.separate_vocals_and_bgm, voice_path, clean_dir, True)
+        clean_voice_path = sep_result['vocalsPath']
+
+        on_progress(55, 'កំពុងបន្ថែមទឹកដម និងគុណភាពសំឡេងឱ្យកាន់តែច្បាស់...')
+        mastered_voice_path = os.path.join(job_dir, 'mastered_voice.wav')
+        audio_processor.master_vocal_track(clean_voice_path, mastered_voice_path)
+
+        on_progress(75, 'កំពុងលាយសំឡេងចូលជាមួយភ្លេងកំដរដើម...')
+        mixed_audio_path = os.path.join(job_dir, 'mixed_audio.mp3')
+        audio_processor.mix_vocals_with_original(original_audio_path, mastered_voice_path, mixed_audio_path, 2.0, 0.85)
+
+        on_progress(92, 'កំពុងផ្គុំចូលវីដេអូចុងក្រោយ...')
+        video_ext = os.path.splitext(video_path)[1] or '.mp4'
+        final_video_path = os.path.join(job_dir, f'redub_final{video_ext}')
+        audio_processor.merge_video_audio(video_path, mixed_audio_path, final_video_path)
+
+        job['mediaType'] = 'video'
+        job['outputUrl'] = f"/media/{job_id}/{os.path.basename(final_video_path)}"
+        job['script'] = None
+        job['status'] = 'done'
+        job['progress'] = 100
+        job['message'] = 'ជោគជ័យ! សំឡេងរបស់អ្នកត្រូវបានបញ្ចូលទៅវីដេអូរួចរាល់ហើយ 🎉'
+    except Exception as e:
+        traceback.print_exc()
+        job['status'] = 'error'
+        job['error'] = str(e)
+        job['message'] = f'កំហុស: {e}'
+
+
+@app.post('/api/redub')
+async def start_redub(background_tasks: BackgroundTasks, video: UploadFile = File(...), voice: UploadFile = File(...)):
+    video_ext = os.path.splitext(video.filename or '')[1].lower()
+    voice_ext = os.path.splitext(voice.filename or '')[1].lower()
+    if video_ext not in ALLOWED_EXT:
+        raise HTTPException(status_code=400, detail=f"ប្រភេទឯកសារវីដេអូមិនត្រូវបានគាំទ្រ: {video_ext}")
+    if voice_ext not in ALLOWED_VOICE_EXT:
+        raise HTTPException(status_code=400, detail=f"ប្រភេទឯកសារសំឡេងមិនត្រូវបានគាំទ្រ: {voice_ext}")
+
+    job_id = uuid.uuid4().hex[:10]
+    video_path = os.path.join(UPLOAD_DIR, f"{job_id}_video{video_ext}")
+    voice_path = os.path.join(UPLOAD_DIR, f"{job_id}_voice{voice_ext}")
+    with open(video_path, 'wb') as f:
+        shutil.copyfileobj(video.file, f)
+    with open(voice_path, 'wb') as f:
+        shutil.copyfileobj(voice.file, f)
+
+    jobs[job_id] = {
+        'status': 'queued',
+        'progress': 1,
+        'message': 'កំពុងរង់ចាំចាប់ផ្តើម...',
+        'mediaType': None,
+        'outputUrl': None,
+        'script': None,
+        'error': None,
+    }
+    background_tasks.add_task(run_voice_redub_job, job_id, video_path, voice_path)
+    return {'jobId': job_id}
 
 
 def download_video_from_url(url: str, dest_dir: str) -> str:
