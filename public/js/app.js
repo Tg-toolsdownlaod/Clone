@@ -3547,14 +3547,12 @@ function initAuthAndRBAC() {
     }
   }
 
-  // Check Current Session on Load
+  // Check Current Session on Load.
+  // Always ask the server (even with no saved token): when the server is
+  // running with DISABLE_LOGIN (the default for local/personal use), it
+  // treats every request as an already logged-in admin, so the login modal
+  // never needs to appear at all.
   async function checkAuthStatus() {
-    const token = localStorage.getItem('studio_auth_token');
-    if (!token) {
-      if (authModal) authModal.classList.remove('hidden');
-      return;
-    }
-
     try {
       const res = await fetch('/api/auth/me');
       if (res.ok) {

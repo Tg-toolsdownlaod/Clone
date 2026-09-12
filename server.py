@@ -53,8 +53,18 @@ khmer_dubber = KhmerDubber()
 active_jobs = {}
 
 # --- Authentication Helpers ---
+# Personal/local single-user deployments can skip login & premium tiers entirely
+# by leaving DISABLE_LOGIN unset or true (the default). Set DISABLE_LOGIN=false
+# in .env to restore normal multi-user login + premium gating.
+DISABLE_LOGIN = os.getenv('DISABLE_LOGIN', 'true').strip().lower() not in ('false', '0', 'no')
+LOCAL_ADMIN_USER = {'id': 0, 'username': 'local', 'role': 'admin', 'tier': 'premium'}
+
 def get_request_user(request: Request) -> Optional[dict]:
-    """Retrieve validated user from Authorization Bearer token or headers."""
+    """Retrieve validated user from Authorization Bearer token or headers.
+
+    When DISABLE_LOGIN is active, every request is treated as an already
+    logged-in admin/premium user unless a real token is presented, so the
+    Studio works fully without ever showing the login screen."""
     auth_header = request.headers.get('Authorization', '')
     token = ''
     if auth_header.startswith('Bearer '):
@@ -63,7 +73,12 @@ def get_request_user(request: Request) -> Optional[dict]:
         token = request.headers.get('x-auth-token', '')
     if not token:
         token = request.query_params.get('token', '')
-    return auth_db.get_user_by_token(token) if token else None
+
+    user = auth_db.get_user_by_token(token) if token else None
+    if user:
+        return user
+
+    return LOCAL_ADMIN_USER if DISABLE_LOGIN else None
 
 def require_admin(request: Request) -> dict:
     """Ensure current user is authenticated and has admin role."""
