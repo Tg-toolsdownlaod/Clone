@@ -442,45 +442,79 @@ h1 { margin: 0 0 8px; font-size: 1.55rem; font-weight: 700; letter-spacing: -0.0
   overflow-y: auto;
 }
 
-/* Review & edit lines (per-character correction step) */
-.review-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: 420px;
-  overflow-y: auto;
+/* Review & edit lines — one line at a time, with character reassignment
+   and a test-listen preview, before any final voice is generated. */
+.review-progress {
   text-align: left;
-  margin-bottom: 22px;
-  padding-right: 2px;
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--text-faint);
+  margin-bottom: 10px;
+  letter-spacing: 0.02em;
 }
 .review-item {
+  text-align: left;
   background: var(--surface-2);
   border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-bottom: 16px;
   transition: border-color 0.15s ease;
 }
 .review-item:focus-within { border-color: var(--accent); }
-.review-item-speaker {
-  font-weight: 650;
-  font-size: 0.8rem;
-  color: var(--accent);
-  margin-bottom: 6px;
+.review-item-speaker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
 }
-.review-item-text {
-  width: 100%;
-  resize: vertical;
-  min-height: 44px;
+.review-item-speaker-row label {
+  font-weight: 650;
+  font-size: 0.82rem;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.review-item-speaker-row select {
+  flex: 1;
+  min-width: 160px;
   background: var(--bg-2);
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   padding: 8px 10px;
   color: var(--text);
   font-family: 'Kantumruy Pro', sans-serif;
-  font-size: 0.88rem;
-  line-height: 1.55;
+  font-size: 0.85rem;
+}
+.review-item-text {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-family: 'Kantumruy Pro', sans-serif;
+  font-size: 0.92rem;
+  line-height: 1.6;
 }
 .review-item-text:focus { outline: none; border-color: var(--accent); }
+.review-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.review-preview-row audio { height: 34px; max-width: 240px; flex: 1; }
+.review-nav {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.review-nav .btn { flex: 1; }
 
 /* Error */
 .error-badge {

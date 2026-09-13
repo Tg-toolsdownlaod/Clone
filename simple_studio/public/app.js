@@ -7,7 +7,13 @@ const els = {
   resultCard: document.getElementById('resultCard'),
   errorCard: document.getElementById('errorCard'),
 
-  reviewList: document.getElementById('reviewList'),
+  reviewProgress: document.getElementById('reviewProgress'),
+  reviewSpeakerSelect: document.getElementById('reviewSpeakerSelect'),
+  reviewTextArea: document.getElementById('reviewTextArea'),
+  reviewTestBtn: document.getElementById('reviewTestBtn'),
+  reviewPreviewPlayer: document.getElementById('reviewPreviewPlayer'),
+  reviewPrevBtn: document.getElementById('reviewPrevBtn'),
+  reviewNextBtn: document.getElementById('reviewNextBtn'),
   reviewConfirmBtn: document.getElementById('reviewConfirmBtn'),
   reviewCancelBtn: document.getElementById('reviewCancelBtn'),
 
@@ -176,7 +182,10 @@ els.scriptToggleBtn.addEventListener('click', () => {
 function resetToUpload() {
   clearInterval(pollTimer);
   currentJobId = null;
-  els.reviewList.innerHTML = '';
+  reviewSegments = [];
+  reviewEdits = {};
+  reviewSpeakerOptions = [];
+  reviewIndex = 0;
   selectedFile = null;
   els.fileInput.value = '';
   els.videoUrlInput.value = '';
@@ -309,34 +318,130 @@ function pollStatus(jobId) {
 
 // ----------------------------------------------------
 // Review & edit step — shown after AI transcribes/translates each
-// character's line, before any voice is actually generated, so a
-// misheard line or misassigned character can be corrected first.
+// character's line, before any voice is actually generated. Lines are
+// shown one at a time: text can be corrected, the character/voice can be
+// reassigned, and a test-listen preview can be played before confirming.
 // ----------------------------------------------------
-function showReview(job) {
-  const segments = job.segments || [];
-  els.reviewList.innerHTML = '';
-  segments.forEach((seg) => {
-    const item = document.createElement('div');
-    item.className = 'review-item';
-    item.dataset.id = seg.id;
-    item.innerHTML = `
-      <div class="review-item-speaker">🗣️ ${escapeHtml(seg.speakerName || 'តួអង្គ')}</div>
-      <textarea class="review-item-text" rows="2"></textarea>
-    `;
-    item.querySelector('.review-item-text').value = seg.text || '';
-    els.reviewList.appendChild(item);
-  });
+let reviewSegments = [];
+let reviewSpeakerOptions = [];
+let reviewEdits = {}; // { [lineIndex]: { text, speakerId?, voiceId? } }
+let reviewIndex = 0;
 
+function showReview(job) {
+  reviewSegments = job.segments || [];
+  reviewSpeakerOptions = job.speakerOptions || [];
+  reviewEdits = {};
+  reviewIndex = 0;
+  renderReviewLine();
   showCard('review');
 }
+
+function reviewSelectValueFor(index) {
+  const edit = reviewEdits[index];
+  if (edit && edit.voiceId) return `voice:${edit.voiceId}`;
+  if (edit && edit.speakerId) return `char:${edit.speakerId}`;
+  return 'orig';
+}
+
+function renderReviewLine() {
+  const seg = reviewSegments[reviewIndex];
+  if (!seg) return;
+
+  els.reviewProgress.textContent = `ឃ្លាទី ${reviewIndex + 1} / ${reviewSegments.length} — 🗣️ ${seg.speakerName || 'តួអង្គ'}`;
+
+  const edit = reviewEdits[reviewIndex];
+  els.reviewTextArea.value = (edit && typeof edit.text === 'string') ? edit.text : (seg.text || '');
+
+  let optionsHtml = `<option value="orig">🎯 ដូចដើម (AI បានកំណត់ — ${escapeHtml(seg.speakerName || '')})</option>`;
+  if (reviewSpeakerOptions.length) {
+    optionsHtml += `<optgroup label="តួអង្គដែលបានរកឃើញ">`;
+    reviewSpeakerOptions.forEach((s) => {
+      optionsHtml += `<option value="char:${s.speakerId}">🗣️ ${escapeHtml(s.speakerName)}</option>`;
+    });
+    optionsHtml += `</optgroup>`;
+  }
+  if (cachedVoices.length) {
+    optionsHtml += `<optgroup label="សំឡេងគំរូដែលបានរក្សាទុក">`;
+    cachedVoices.forEach((v) => {
+      optionsHtml += `<option value="voice:${v.id}">🎙️ ${escapeHtml(v.label)}</option>`;
+    });
+    optionsHtml += `</optgroup>`;
+  }
+  els.reviewSpeakerSelect.innerHTML = optionsHtml;
+  els.reviewSpeakerSelect.value = reviewSelectValueFor(reviewIndex);
+
+  els.reviewPreviewPlayer.classList.add('hidden');
+  els.reviewPreviewPlayer.removeAttribute('src');
+
+  els.reviewPrevBtn.disabled = reviewIndex === 0;
+  els.reviewNextBtn.disabled = reviewIndex === reviewSegments.length - 1;
+}
+
+function saveCurrentReviewLine() {
+  const selectVal = els.reviewSpeakerSelect.value;
+  const edit = { text: els.reviewTextArea.value };
+  if (selectVal.startsWith('char:')) edit.speakerId = selectVal.slice(5);
+  else if (selectVal.startsWith('voice:')) edit.voiceId = selectVal.slice(6);
+  reviewEdits[reviewIndex] = edit;
+}
+
+els.reviewPrevBtn.addEventListener('click', () => {
+  saveCurrentReviewLine();
+  if (reviewIndex > 0) {
+    reviewIndex -= 1;
+    renderReviewLine();
+  }
+});
+
+els.reviewNextBtn.addEventListener('click', () => {
+  saveCurrentReviewLine();
+  if (reviewIndex < reviewSegments.length - 1) {
+    reviewIndex += 1;
+    renderReviewLine();
+  }
+});
+
+els.reviewTestBtn.addEventListener('click', async () => {
+  saveCurrentReviewLine();
+  const edit = reviewEdits[reviewIndex] || {};
+
+  els.reviewTestBtn.disabled = true;
+  els.reviewTestBtn.textContent = '⏳ កំពុងបង្កើតសំឡេង...';
+  try {
+    const res = await fetch('/api/preview-line', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jobId: currentJobId,
+        lineId: reviewIndex,
+        text: edit.text,
+        speakerId: edit.speakerId,
+        voiceId: edit.voiceId,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'សាកល្បងស្តាប់បរាជ័យ');
+
+    els.reviewPreviewPlayer.src = data.previewUrl;
+    els.reviewPreviewPlayer.classList.remove('hidden');
+    els.reviewPreviewPlayer.play().catch(() => {});
+  } catch (err) {
+    showToast(err.message || 'សាកល្បងស្តាប់បរាជ័យ', 'error');
+  } finally {
+    els.reviewTestBtn.disabled = false;
+    els.reviewTestBtn.textContent = '▶️ ស្តាប់សាកល្បង';
+  }
+});
 
 els.reviewCancelBtn.addEventListener('click', resetToUpload);
 
 els.reviewConfirmBtn.addEventListener('click', async () => {
   if (!currentJobId) return;
+  saveCurrentReviewLine();
+
   const edits = {};
-  els.reviewList.querySelectorAll('.review-item').forEach((item) => {
-    edits[item.dataset.id] = item.querySelector('.review-item-text').value;
+  Object.keys(reviewEdits).forEach((idx) => {
+    edits[idx] = reviewEdits[idx];
   });
 
   els.reviewConfirmBtn.disabled = true;

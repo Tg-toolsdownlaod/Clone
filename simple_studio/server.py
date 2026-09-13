@@ -142,6 +142,22 @@ async def render_dubbed_output(job_dir: str, is_video: bool, input_path: str, ex
     return {'mediaType': 'audio', 'outputPath': mixed_path}
 
 
+def resolve_line_ref_voice(pending: dict, seg: dict, speaker_id: str = None, voice_id: str = None):
+    """Work out which reference voice a review line should clone from, given
+    an optional reassignment to a different detected character or a saved
+    voice-library sample — used by both the test-listen preview and the
+    final render, so what you hear in the test is exactly what you get."""
+    if voice_id:
+        match = next((v for v in load_voices() if v['id'] == voice_id), None)
+        if match:
+            return os.path.join(VOICES_DIR, match['filename'])
+    if speaker_id and speaker_id != seg.get('speaker_id'):
+        mapped = pending.get('auto_voice_map', {}).get(speaker_id)
+        if mapped:
+            return mapped
+    return seg.get('_refVoice')
+
+
 async def run_job(job_id: str, input_path: str, ref_voice_path: str = None):
     """Phase 1: analyze — transcribe, translate Chinese to Khmer, and assign
     a voice per character. Stops at 'review' status so the user can see and
@@ -182,7 +198,15 @@ async def run_job(job_id: str, input_path: str, ref_voice_path: str = None):
             'extracted_audio_path': extracted_audio_path,
             'duration': duration,
             'segments': segments,
+            'auto_voice_map': auto_voice_map,
         }
+
+        seen_speakers = {}
+        for seg in segments:
+            sid = seg.get('speaker_id')
+            if sid not in seen_speakers:
+                seen_speakers[sid] = seg.get('speaker_name') or sid
+
         job['segments'] = [
             {
                 'id': i,
@@ -192,6 +216,7 @@ async def run_job(job_id: str, input_path: str, ref_voice_path: str = None):
             }
             for i, seg in enumerate(segments)
         ]
+        job['speakerOptions'] = [{'speakerId': sid, 'speakerName': name} for sid, name in seen_speakers.items()]
         job['status'] = 'review'
         job['progress'] = 45
         job['message'] = 'សូមពិនិត្យ និងកែសម្រួលឃ្លានីមួយៗរបស់តួអង្គនីមួយៗ (បើត្រូវការ) រួចចុច "បញ្ជាក់ និងបង្កើតសំឡេង"'
@@ -200,6 +225,40 @@ async def run_job(job_id: str, input_path: str, ref_voice_path: str = None):
         job['status'] = 'error'
         job['error'] = str(e)
         job['message'] = f'កំហុស: {e}'
+
+
+@app.post('/api/preview-line')
+async def preview_line(payload: dict = Body(...)):
+    """Synthesize just one review line with its currently-selected text and
+    voice, so the user can listen before committing to the full render."""
+    job_id = payload.get('jobId')
+    pending = pending_jobs.get(job_id)
+    if not pending:
+        raise HTTPException(status_code=404, detail='ការងារនេះរកមិនឃើញ ឬបានបង្កើតរួចហើយ')
+
+    try:
+        line_id = int(payload.get('lineId'))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail='លេខឃ្លាមិនត្រឹមត្រូវ')
+
+    segments = pending['segments']
+    if line_id < 0 or line_id >= len(segments):
+        raise HTTPException(status_code=400, detail='លេខឃ្លាមិនត្រឹមត្រូវ')
+
+    seg = segments[line_id]
+    text = (payload.get('text') or seg.get('khmer_translation', '')).strip()
+    speaker_id = payload.get('speakerId')
+    voice_id = payload.get('voiceId')
+    ref_voice = resolve_line_ref_voice(pending, seg, speaker_id, voice_id)
+    gender = seg.get('gender')
+    role = seg.get('speaker_role', 'male_lead' if gender != 'female' else 'female_lead')
+
+    preview_path = os.path.join(pending['job_dir'], f'preview_line_{line_id}.mp3')
+    await dubber.synthesize_realistic_speech(
+        text, preview_path, 'voxcpm-voice-actor', ref_voice,
+        {'gender': gender, 'emotion': seg.get('emotion', 'dramatic'), 'role': role},
+    )
+    return {'previewUrl': f"/media/{job_id}/{os.path.basename(preview_path)}?t={uuid.uuid4().hex[:6]}"}
 
 
 async def run_render_phase(job_id: str, edits: dict):
@@ -222,9 +281,23 @@ async def run_render_phase(job_id: str, edits: dict):
         job['status'] = 'processing'
         segments = pending['segments']
         for i, seg in enumerate(segments):
-            edited_text = edits.get(str(i))
-            if edited_text and edited_text.strip():
-                seg['khmer_translation'] = edited_text.strip()
+            edit = edits.get(str(i)) or {}
+            text = edit.get('text')
+            if text and text.strip():
+                seg['khmer_translation'] = text.strip()
+
+            speaker_id = edit.get('speakerId')
+            voice_id = edit.get('voiceId')
+            if speaker_id or voice_id:
+                seg['_refVoice'] = resolve_line_ref_voice(pending, seg, speaker_id, voice_id)
+                if speaker_id:
+                    matched_name = next(
+                        (s['speakerName'] for s in job.get('speakerOptions', []) if s['speakerId'] == speaker_id),
+                        None,
+                    )
+                    seg['speaker_id'] = speaker_id
+                    if matched_name:
+                        seg['speaker_name'] = matched_name
 
         result = await render_dubbed_output(
             pending['job_dir'], pending['is_video'], pending['input_path'],
