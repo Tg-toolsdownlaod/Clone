@@ -568,6 +568,165 @@ class KhmerDubber:
 
         return all_segments
 
+    async def transcribe_khmer_only_chunk_with_gemini(self, chunk_path: str, chunk_start_time: float, retries: int = 2, preferred_model: str = None) -> list:
+        """Pure Khmer speech-to-text (no translation) — used when the user already
+        has a correctly-dubbed Khmer narration and just wants it re-synthesized
+        in a different/nicer voice while keeping the exact same wording."""
+        api_key = os.getenv('GEMINI_API_KEY')
+        if not api_key:
+            return []
+
+        active_choice = preferred_model or os.getenv('GEMINI_MODEL', 'gemini-3.5-flash')
+        candidate_models = [active_choice]
+        for m in ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.7-flash', 'gemini-flash-latest']:
+            if m not in candidate_models:
+                candidate_models.append(m)
+
+        with open(chunk_path, 'rb') as f:
+            base64_audio = base64.b64encode(f.read()).decode('utf-8')
+
+        prompt = (
+            "You are an expert Khmer (Cambodian) speech transcriptionist.\n"
+            "Listen carefully to this audio clip, which contains spoken Khmer narration/dialogue.\n"
+            "Transcribe EVERY spoken Khmer line EXACTLY as spoken — this is pure speech-to-text, NOT translation. "
+            "Do NOT paraphrase, summarize, or add/remove words.\n\n"
+            "CRITICAL RULES:\n"
+            "- Output text in 100% pure authentic Khmer script (អក្សរខ្មែរ) only.\n"
+            "- Split into natural spoken segments/sentences with accurate start_time and end_time (seconds, relative to this clip).\n\n"
+            "Output format: Return a JSON array enclosed in ```json ... ``` code block:\n"
+            "```json\n"
+            "[\n"
+            "  {\n"
+            "    \"start_time\": 1.2,\n"
+            "    \"end_time\": 4.5,\n"
+            "    \"khmer_text\": \"អត្ថបទដែលបាននិយាយពិតប្រាកដ\"\n"
+            "  }\n"
+            "]\n"
+            "```"
+        )
+
+        for model_name in candidate_models:
+            for attempt in range(1, retries + 1):
+                try:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+                    headers = {
+                        "x-goog-api-key": api_key,
+                        "Content-Type": "application/json"
+                    }
+                    payload = {
+                        "contents": [{
+                            "parts": [
+                                {"text": prompt},
+                                {
+                                    "inlineData": {
+                                        "mimeType": "audio/mp3",
+                                        "data": base64_audio
+                                    }
+                                }
+                            ]
+                        }]
+                    }
+                    resp = requests.post(url, headers=headers, json=payload, timeout=90)
+                    if resp.status_code == 429:
+                        print(f"Gemini ASR ({model_name}) rate limit at chunk {chunk_start_time}s. Waiting 18s backoff...")
+                        await asyncio.sleep(18)
+                        continue
+
+                    if resp.status_code != 200:
+                        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:100]}")
+
+                    data = resp.json()
+                    raw = data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+                    if not raw:
+                        continue
+
+                    json_str = raw
+                    match = re.search(r'```json\s*([\s\S]*?)\s*```', raw)
+                    if match:
+                        json_str = match.group(1)
+                    else:
+                        match2 = re.search(r'\[\s*\{[\s\S]*\}\s*\]', raw)
+                        if match2:
+                            json_str = match2.group(0)
+
+                    parsed = json.loads(json_str)
+                    if not isinstance(parsed, list):
+                        continue
+
+                    def parse_time(val, default):
+                        if val is None: return default
+                        if isinstance(val, (int, float)): return float(val)
+                        if isinstance(val, str) and ':' in val:
+                            parts = [float(p) for p in val.split(':')]
+                            if len(parts) == 2: return parts[0] * 60 + parts[1]
+                            if len(parts) == 3: return parts[0] * 3600 + parts[1] * 60 + parts[2]
+                        try:
+                            return float(val)
+                        except Exception:
+                            return default
+
+                    result = []
+                    for idx, seg in enumerate(parsed):
+                        st = parse_time(seg.get('start_time') or seg.get('start'), idx * 2.5)
+                        et = parse_time(seg.get('end_time') or seg.get('end'), st + 2.5)
+                        khmer = clean_pure_khmer(seg.get('khmer_text') or seg.get('khmer_translation') or seg.get('text') or '')
+                        if not khmer or not any('ក' <= c <= '៿' for c in khmer):
+                            continue
+                        result.append({
+                            'speaker_id': 'speaker_1',
+                            'start_time': max(0.0, st + chunk_start_time),
+                            'end_time': max(st + chunk_start_time + 0.5, et + chunk_start_time),
+                            'khmer_translation': khmer,
+                            'emotion': 'neutral'
+                        })
+                    return result
+                except Exception as err:
+                    print(f"Gemini ASR ({model_name}) error at chunk {chunk_start_time}s: {str(err)[:80]}")
+                    if attempt < retries:
+                        await asyncio.sleep(3)
+        return []
+
+    async def extract_khmer_only_timeline(self, audio_path: str, total_duration: float, on_progress=None, preferred_model: str = None) -> list:
+        """Transcribe an already-Khmer narration into timed segments (no translation),
+        for the 'recreate voice' flow where content/timing is already correct and only
+        the voice itself needs to be re-synthesized."""
+        chunk_size = 75.0
+        temp_dir = os.path.join(os.path.dirname(audio_path), f"khmer_asr_chunks_{int(asyncio.get_event_loop().time() * 1000)}")
+        os.makedirs(temp_dir, exist_ok=True)
+        all_segments = []
+
+        try:
+            current_offset = 0.0
+            chunk_index = 0
+            while current_offset < total_duration:
+                chunk_len = min(chunk_size, total_duration - current_offset)
+                if chunk_len <= 1.0:
+                    break
+
+                prog = min(40, 5 + round((current_offset / max(1.0, total_duration)) * 35))
+                mins = int(current_offset // 60)
+                secs = int(current_offset % 60)
+                if on_progress: on_progress(prog, f"AI កំពុងស្តាប់ និងសរសេរអត្ថបទសម្តីខ្មែរ ({mins}:{secs:02d})...")
+
+                chunk_path = os.path.join(temp_dir, f"chunk_{chunk_index}.mp3")
+                audio_processor.run_command(f'ffmpeg -y -ss {current_offset} -t {chunk_len} -i "{audio_path}" -vn -ac 1 -ar 16000 -b:a 32k "{chunk_path}"')
+
+                segs = await self.transcribe_khmer_only_chunk_with_gemini(chunk_path, current_offset, preferred_model=preferred_model)
+                if segs:
+                    all_segments.extend(segs)
+
+                current_offset += chunk_len
+                chunk_index += 1
+                await asyncio.sleep(2.0)
+        finally:
+            try:
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+        return all_segments
+
     async def extract_character_voice_samples(self, audio_path: str, segments: list, output_dir: str) -> dict:
         character_voice_map = {}
         speaker_groups = {}

@@ -256,6 +256,114 @@ async def start_redub(background_tasks: BackgroundTasks, video: UploadFile = Fil
     return {'jobId': job_id}
 
 
+async def run_recreate_voice_job(job_id: str, video_path: str, khmer_audio_path: str, ref_voice_path: str = None, gender: str = 'female'):
+    """Take a Khmer narration that already matches the video's story and
+    re-synthesize it with a chosen voice (built-in neural or a saved voice
+    library sample), keeping the original wording and timing, then mix the
+    new voice back onto the video's original background music."""
+    job = jobs[job_id]
+    job_dir = os.path.join(OUTPUT_DIR, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+
+    def on_progress(pct, msg):
+        job['progress'] = pct
+        job['message'] = msg
+        job['status'] = 'processing'
+
+    try:
+        job['status'] = 'processing'
+        on_progress(3, 'កំពុងស្រង់សំឡេងដើមចេញពីវីដេអូ (សម្រាប់ភ្លេងកំដរ)...')
+        original_audio_path = os.path.join(job_dir, 'original_audio.mp3')
+        audio_processor.extract_audio(video_path, original_audio_path)
+
+        duration = audio_processor.get_media_duration(khmer_audio_path)
+        segments = await dubber.extract_khmer_only_timeline(khmer_audio_path, duration, on_progress)
+        if not segments:
+            raise RuntimeError('AI ស្តាប់មិនឃើញអត្ថបទសម្តីខ្មែរណាមួយក្នុងឯកសារនេះទេ')
+
+        total = len(segments)
+        role = 'female_lead' if gender != 'male' else 'male_lead'
+        for i, seg in enumerate(segments):
+            line_path = os.path.join(job_dir, f"line_{i}.wav")
+            prog = 45 + round(((i + 1) / total) * 35)
+            on_progress(prog, f'កំពុងបង្កើតសំឡេងឡើងវិញ ({i + 1}/{total})...')
+            await dubber.synthesize_realistic_speech(
+                seg.get('khmer_translation', ''),
+                line_path,
+                'voxcpm-voice-actor',
+                ref_voice_path,
+                {'gender': gender, 'emotion': 'neutral', 'role': role},
+            )
+            seg['audioPath'] = line_path
+
+        on_progress(85, 'កំពុងតម្រៀបសំឡេងតាមពេលវេលាដើម...')
+        master_path = os.path.join(job_dir, 'recreated_voice_master.wav')
+        await dubber.assemble_timeline_audio(segments, duration, master_path)
+
+        on_progress(93, 'កំពុងលាយសំឡេងថ្មីជាមួយភ្លេងកំដរដើម...')
+        mixed_audio_path = os.path.join(job_dir, 'mixed_audio.mp3')
+        audio_processor.mix_vocals_with_original(original_audio_path, master_path, mixed_audio_path, 2.2, 0.85)
+
+        on_progress(97, 'កំពុងផ្គុំចូលវីដេអូចុងក្រោយ...')
+        video_ext = os.path.splitext(video_path)[1] or '.mp4'
+        final_video_path = os.path.join(job_dir, f'recreated_final{video_ext}')
+        audio_processor.merge_video_audio(video_path, mixed_audio_path, final_video_path)
+
+        job['mediaType'] = 'video'
+        job['outputUrl'] = f"/media/{job_id}/{os.path.basename(final_video_path)}"
+        job['script'] = "\n".join(s.get('khmer_translation', '') for s in segments)
+        job['status'] = 'done'
+        job['progress'] = 100
+        job['message'] = 'ជោគជ័យ! សំឡេងត្រូវបានបង្កើតឡើងវិញ និងបញ្ចូលទៅវីដេអូរួចរាល់ហើយ 🎉'
+    except Exception as e:
+        traceback.print_exc()
+        job['status'] = 'error'
+        job['error'] = str(e)
+        job['message'] = f'កំហុស: {e}'
+
+
+@app.post('/api/recreate-voice')
+async def start_recreate_voice(
+    background_tasks: BackgroundTasks,
+    video: UploadFile = File(...),
+    voice: UploadFile = File(...),
+    voiceId: str = Form(None),
+    gender: str = Form('female'),
+):
+    video_ext = os.path.splitext(video.filename or '')[1].lower()
+    voice_ext = os.path.splitext(voice.filename or '')[1].lower()
+    if video_ext not in ALLOWED_EXT:
+        raise HTTPException(status_code=400, detail=f"ប្រភេទឯកសារវីដេអូមិនត្រូវបានគាំទ្រ: {video_ext}")
+    if voice_ext not in ALLOWED_VOICE_EXT:
+        raise HTTPException(status_code=400, detail=f"ប្រភេទឯកសារសំឡេងមិនត្រូវបានគាំទ្រ: {voice_ext}")
+
+    ref_voice_path = None
+    if voiceId:
+        match = next((v for v in load_voices() if v['id'] == voiceId), None)
+        if match:
+            ref_voice_path = os.path.join(VOICES_DIR, match['filename'])
+
+    job_id = uuid.uuid4().hex[:10]
+    video_path = os.path.join(UPLOAD_DIR, f"{job_id}_video{video_ext}")
+    voice_path = os.path.join(UPLOAD_DIR, f"{job_id}_voice{voice_ext}")
+    with open(video_path, 'wb') as f:
+        shutil.copyfileobj(video.file, f)
+    with open(voice_path, 'wb') as f:
+        shutil.copyfileobj(voice.file, f)
+
+    jobs[job_id] = {
+        'status': 'queued',
+        'progress': 1,
+        'message': 'កំពុងរង់ចាំចាប់ផ្តើម...',
+        'mediaType': None,
+        'outputUrl': None,
+        'script': None,
+        'error': None,
+    }
+    background_tasks.add_task(run_recreate_voice_job, job_id, video_path, voice_path, ref_voice_path, gender or 'female')
+    return {'jobId': job_id}
+
+
 def download_video_from_url(url: str, dest_dir: str) -> str:
     """Download a video/audio from a public link (YouTube, TikTok, Facebook, etc.)
     using yt-dlp. Runs with an explicit argument list (never shell=True) so the

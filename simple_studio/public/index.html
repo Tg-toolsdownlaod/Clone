@@ -24,6 +24,7 @@
       <div class="mode-tabs">
         <button type="button" class="mode-tab active" id="modeTabAuto">🤖 ស្វ័យប្រវត្តិ</button>
         <button type="button" class="mode-tab" id="modeTabMyVoice">🎙️ សំឡេងផ្ទាល់ខ្លួន</button>
+        <button type="button" class="mode-tab" id="modeTabRecreate">🔄 កែឲ្យពីរោះ</button>
       </div>
 
       <div id="autoModeSection">
@@ -91,6 +92,39 @@
         </label>
 
         <button class="btn btn-primary btn-full" id="myVoiceStartBtn" type="button" disabled>ចាប់ផ្តើមបញ្ចូលសំឡេង</button>
+      </div>
+
+      <div id="recreateModeSection" class="hidden">
+        <h1>កែសំឡេងសម្តីឲ្យពីរោះឡើងវិញ</h1>
+        <p class="subtitle">មានវីដេអូ ជាមួយសំឡេងខ្មែរដែលត្រូវនឹងសាច់រឿងរួចហើយ តែចង់ឲ្យស្តាប់ទៅពីរោះជាងមុន? AI នឹងស្តាប់អត្ថបទសម្តី រួចបង្កើតឡើងវិញដោយសំឡេងដែលអ្នកជ្រើសរើស ដោយរក្សាពាក្យសម្តី ពេលវេលា និងភ្លេងកំដរដើមឲ្យដដែល</p>
+
+        <div class="voice-picker">
+          <label for="recreateVoiceSelect">🎙️ ជ្រើសរើសសំឡេងថ្មី</label>
+          <div class="voice-picker-row">
+            <select id="recreateVoiceSelect" class="voice-select">
+              <option value="__auto_female">🤖 សំឡេងស្រី ស្តង់ដារ (Neural)</option>
+              <option value="__auto_male">🤖 សំឡេងប្រុស ស្តង់ដារ (Neural)</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" id="openVoiceLibBtnRecreate" type="button">🎙️ គ្រប់គ្រងសំឡេងគំរូ</button>
+          </div>
+          <div class="voice-picker-hint">ជ្រើសរើសសំឡេងគំរូមួយ ដើម្បីឲ្យ AI ក្លែងតាមសំឡេងនោះ ឬទុកលំនាំដើមសម្រាប់សំឡេង Neural ស្តង់ដារ</div>
+        </div>
+
+        <label class="dropzone dropzone-sm" id="recreateVideoDropzone" for="recreateVideoInput">
+          <div class="dropzone-icon">🎞️</div>
+          <div class="dropzone-text" id="recreateVideoText">ជំហានទី ១ — អូសទម្លាក់ ឬ ជ្រើសរើសវីដេអូ</div>
+          <div class="dropzone-formats">MP4 · MKV · MOV · WEBM</div>
+          <input type="file" id="recreateVideoInput" accept=".mp4,.mkv,.mov,.avi,.webm" hidden>
+        </label>
+
+        <label class="dropzone dropzone-sm" id="recreateAudioDropzone" for="recreateAudioInput">
+          <div class="dropzone-icon">🎙️</div>
+          <div class="dropzone-text" id="recreateAudioText">ជំហានទី ២ — អូសទម្លាក់ ឬ ជ្រើសរើសសំឡេងខ្មែរដែលត្រូវនឹងសាច់រឿងរួចហើយ</div>
+          <div class="dropzone-formats">MP3 · WAV · M4A · AAC · OGG</div>
+          <input type="file" id="recreateAudioInput" accept=".mp3,.wav,.m4a,.aac,.ogg" hidden>
+        </label>
+
+        <button class="btn btn-primary btn-full" id="recreateStartBtn" type="button" disabled>ចាប់ផ្តើមកែសំឡេងឡើងវិញ</button>
       </div>
     </section>
 

@@ -35,8 +35,10 @@ const els = {
 
   modeTabAuto: document.getElementById('modeTabAuto'),
   modeTabMyVoice: document.getElementById('modeTabMyVoice'),
+  modeTabRecreate: document.getElementById('modeTabRecreate'),
   autoModeSection: document.getElementById('autoModeSection'),
   myVoiceModeSection: document.getElementById('myVoiceModeSection'),
+  recreateModeSection: document.getElementById('recreateModeSection'),
 
   myVoiceVideoDropzone: document.getElementById('myVoiceVideoDropzone'),
   myVoiceVideoInput: document.getElementById('myVoiceVideoInput'),
@@ -45,6 +47,16 @@ const els = {
   myVoiceAudioInput: document.getElementById('myVoiceAudioInput'),
   myVoiceAudioText: document.getElementById('myVoiceAudioText'),
   myVoiceStartBtn: document.getElementById('myVoiceStartBtn'),
+
+  recreateVideoDropzone: document.getElementById('recreateVideoDropzone'),
+  recreateVideoInput: document.getElementById('recreateVideoInput'),
+  recreateVideoText: document.getElementById('recreateVideoText'),
+  recreateAudioDropzone: document.getElementById('recreateAudioDropzone'),
+  recreateAudioInput: document.getElementById('recreateAudioInput'),
+  recreateAudioText: document.getElementById('recreateAudioText'),
+  recreateStartBtn: document.getElementById('recreateStartBtn'),
+  recreateVoiceSelect: document.getElementById('recreateVoiceSelect'),
+  openVoiceLibBtnRecreate: document.getElementById('openVoiceLibBtnRecreate'),
 
   voiceSelect: document.getElementById('voiceSelect'),
   openVoiceLibBtn: document.getElementById('openVoiceLibBtn'),
@@ -168,6 +180,14 @@ function resetToUpload() {
   els.myVoiceVideoText.textContent = 'ជំហានទី ១ — អូសទម្លាក់ ឬ ជ្រើសរើសវីដេអូ';
   els.myVoiceAudioText.textContent = 'ជំហានទី ២ — អូសទម្លាក់ ឬ ជ្រើសរើសសំឡេងដែលអ្នកបានថត';
   els.myVoiceStartBtn.disabled = true;
+
+  recreateVideoFile = null;
+  recreateAudioFile = null;
+  els.recreateVideoInput.value = '';
+  els.recreateAudioInput.value = '';
+  els.recreateVideoText.textContent = 'ជំហានទី ១ — អូសទម្លាក់ ឬ ជ្រើសរើសវីដេអូ';
+  els.recreateAudioText.textContent = 'ជំហានទី ២ — អូសទម្លាក់ ឬ ជ្រើសរើសសំឡេងខ្មែរដែលត្រូវនឹងសាច់រឿងរួចហើយ';
+  els.recreateStartBtn.disabled = true;
 
   setProgress(0, 'កំពុងរង់ចាំចាប់ផ្តើម...');
   showCard('upload');
@@ -327,6 +347,21 @@ function renderVoiceSelect() {
   if (cachedVoices.some((v) => v.id === currentValue)) {
     els.voiceSelect.value = currentValue;
   }
+
+  const currentRecreateValue = els.recreateVoiceSelect.value || '__auto_female';
+  els.recreateVoiceSelect.innerHTML = `
+    <option value="__auto_female">🤖 សំឡេងស្រី ស្តង់ដារ (Neural)</option>
+    <option value="__auto_male">🤖 សំឡេងប្រុស ស្តង់ដារ (Neural)</option>
+  `;
+  cachedVoices.forEach((v) => {
+    const opt = document.createElement('option');
+    opt.value = v.id;
+    opt.textContent = `🎙️ ${v.label}`;
+    els.recreateVoiceSelect.appendChild(opt);
+  });
+  if (currentRecreateValue.startsWith('__auto_') || cachedVoices.some((v) => v.id === currentRecreateValue)) {
+    els.recreateVoiceSelect.value = currentRecreateValue;
+  }
 }
 
 function renderVoiceList() {
@@ -421,14 +456,21 @@ loadVoices();
 // Mode switcher — Auto AI dubbing vs. Replace with My Own Voice
 // ----------------------------------------------------
 function setMode(mode) {
-  const isMyVoice = mode === 'myvoice';
-  els.modeTabAuto.classList.toggle('active', !isMyVoice);
-  els.modeTabMyVoice.classList.toggle('active', isMyVoice);
-  els.autoModeSection.classList.toggle('hidden', isMyVoice);
-  els.myVoiceModeSection.classList.toggle('hidden', !isMyVoice);
+  els.modeTabAuto.classList.toggle('active', mode === 'auto');
+  els.modeTabMyVoice.classList.toggle('active', mode === 'myvoice');
+  els.modeTabRecreate.classList.toggle('active', mode === 'recreate');
+  els.autoModeSection.classList.toggle('hidden', mode !== 'auto');
+  els.myVoiceModeSection.classList.toggle('hidden', mode !== 'myvoice');
+  els.recreateModeSection.classList.toggle('hidden', mode !== 'recreate');
 }
 els.modeTabAuto.addEventListener('click', () => setMode('auto'));
 els.modeTabMyVoice.addEventListener('click', () => setMode('myvoice'));
+els.modeTabRecreate.addEventListener('click', () => setMode('recreate'));
+
+els.openVoiceLibBtnRecreate.addEventListener('click', () => {
+  els.voiceLibModal.classList.remove('hidden');
+  loadVoices();
+});
 
 // ----------------------------------------------------
 // "My Own Voice" redub flow — clean + master a user's own recording,
@@ -494,6 +536,83 @@ async function startVoiceRedub(videoFile, audioFile) {
     const jobId = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/redub', true);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const uploadPct = Math.round((e.loaded / e.total) * 100);
+          setProgress(Math.round(uploadPct * 0.05), `កំពុងបញ្ជូនឯកសារ... ${uploadPct}%`);
+        }
+      };
+      xhr.onload = () => {
+        let data;
+        try {
+          data = JSON.parse(xhr.responseText);
+        } catch (e) {
+          reject(new Error('ការឆ្លើយតបពី Server មិនត្រឹមត្រូវ'));
+          return;
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && data.jobId) {
+          resolve(data.jobId);
+        } else {
+          reject(new Error(data.detail || 'ការបញ្ជូនឯកសារបរាជ័យ'));
+        }
+      };
+      xhr.onerror = () => reject(new Error('មិនអាចភ្ជាប់ទៅ Server បានទេ'));
+      xhr.send(formData);
+    });
+
+    pollStatus(jobId);
+  } catch (err) {
+    showError(err.message || 'ការបញ្ជូនឯកសារបរាជ័យ');
+  }
+}
+
+// ----------------------------------------------------
+// "Recreate Voice" flow — re-synthesize an already-correct Khmer narration
+// with a chosen (nicer / different) voice, keeping the same wording and
+// timing, then mix it back onto the video's original background music.
+// ----------------------------------------------------
+let recreateVideoFile = null;
+let recreateAudioFile = null;
+
+function updateRecreateStartBtn() {
+  els.recreateStartBtn.disabled = !(recreateVideoFile && recreateAudioFile);
+}
+
+wireDropzone(els.recreateVideoDropzone, els.recreateVideoInput, (file) => {
+  recreateVideoFile = file;
+  els.recreateVideoText.textContent = `✅ ${file.name}`;
+  updateRecreateStartBtn();
+});
+
+wireDropzone(els.recreateAudioDropzone, els.recreateAudioInput, (file) => {
+  recreateAudioFile = file;
+  els.recreateAudioText.textContent = `✅ ${file.name}`;
+  updateRecreateStartBtn();
+});
+
+els.recreateStartBtn.addEventListener('click', () => {
+  if (!recreateVideoFile || !recreateAudioFile) return;
+  startRecreateVoice(recreateVideoFile, recreateAudioFile);
+});
+
+async function startRecreateVoice(videoFile, audioFile) {
+  showCard('progress');
+  setProgress(0, 'កំពុងបញ្ជូនឯកសារ...');
+
+  try {
+    const formData = new FormData();
+    formData.append('video', videoFile);
+    formData.append('voice', audioFile);
+    const selectVal = els.recreateVoiceSelect.value || '__auto_female';
+    if (selectVal.startsWith('__auto_')) {
+      formData.append('gender', selectVal === '__auto_male' ? 'male' : 'female');
+    } else {
+      formData.append('voiceId', selectVal);
+    }
+
+    const jobId = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/recreate-voice', true);
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
           const uploadPct = Math.round((e.loaded / e.total) * 100);
