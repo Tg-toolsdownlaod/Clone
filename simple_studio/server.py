@@ -25,7 +25,7 @@ sys.path.insert(0, BASE_DIR)
 from dotenv import load_dotenv
 load_dotenv(os.path.join(BASE_DIR, '.env'))
 
-from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, Body, BackgroundTasks, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -70,6 +70,7 @@ app.add_middleware(
 
 dubber = KhmerDubber()
 jobs = {}
+pending_jobs = {}  # job_id -> analyzed-but-not-yet-rendered data, for the review/edit step
 
 
 def has_video_stream(path: str) -> bool:
@@ -82,35 +83,39 @@ def has_video_stream(path: str) -> bool:
         return False
 
 
-async def run_audio_only_pipeline(audio_path: str, output_dir: str, on_progress, forced_ref_voice: str = None) -> dict:
-    """Same transcription -> translation -> voice-clone -> mix pipeline as the
-    full video path, minus the final video remux step, for audio-only uploads.
+async def mix_with_clean_background(original_audio_path: str, vocal_track_path: str, output_path: str, work_dir: str) -> str:
+    """Separate the true background music/effects out of the original audio
+    (Meta Demucs AI when available) and mix the new Khmer vocal track onto
+    that clean BGM, so the music/effects keep their full original tone
+    instead of the EQ-based vocal-cancellation approximation — this is what
+    makes the result actually sound like the source video. Falls back to
+    that approximation if separation isn't available."""
+    try:
+        sep_dir = os.path.join(work_dir, 'bgm_sep')
+        sep_result = await asyncio.to_thread(vocal_separator.separate_vocals_and_bgm, original_audio_path, sep_dir, True)
+        audio_processor.mix_vocals_with_clean_bgm(sep_result['bgmPath'], vocal_track_path, output_path)
+    except Exception:
+        traceback.print_exc()
+        audio_processor.mix_vocals_with_original(original_audio_path, vocal_track_path, output_path, 2.2, 0.85)
+    return output_path
 
-    If forced_ref_voice is given (a path to a saved voice sample), every line
-    is cloned from that one voice instead of AI auto-detecting a voice per
-    character."""
-    duration = audio_processor.get_media_duration(audio_path)
 
-    on_progress(15, 'AI កំពុងវិភាគ និងស្រង់ការសន្ទនាទាំងអស់ក្នុងឯកសារ...')
-    segments = await dubber.extract_dialogue_timeline(audio_path, duration, 'full', on_progress)
-    if not segments:
-        raise RuntimeError('AI រកមិនឃើញការសន្ទនាណាមួយក្នុងឯកសារនេះទេ')
-
-    on_progress(42, f'បានរកឃើញឃ្លាសរុប {len(segments)}! កំពុងចាត់តាំងសំឡេងតួអង្គ...')
-    auto_voice_map = {} if forced_ref_voice else await dubber.extract_character_voice_samples(audio_path, segments, output_dir)
-
+async def render_dubbed_output(job_dir: str, is_video: bool, input_path: str, extracted_audio_path: str,
+                                segments: list, duration: float, on_progress) -> dict:
+    """Synthesize each (possibly user-edited) line, stitch them onto the
+    original timeline, mix onto the original background, and — for video —
+    remux into the final file. Shared by both video and audio-only jobs."""
     total = len(segments)
     for i, seg in enumerate(segments):
-        ref = forced_ref_voice or auto_voice_map.get(seg.get('speaker_id'))
-        line_path = os.path.join(output_dir, f"line_{i}.wav")
-        prog = 50 + round(((i + 1) / total) * 32)
+        line_path = os.path.join(job_dir, f"line_{i}.wav")
+        prog = 55 + round(((i + 1) / total) * 30)
         char_name = seg.get('speaker_name') or seg.get('speaker_id')
         on_progress(prog, f'កំពុងបញ្ចេញសំឡេង "{char_name}" ({i + 1}/{total})...')
         await dubber.synthesize_realistic_speech(
             seg.get('khmer_translation', ''),
             line_path,
             'voxcpm-voice-actor',
-            ref,
+            seg.get('_refVoice'),
             {
                 'gender': seg.get('gender'),
                 'emotion': seg.get('emotion', 'dramatic'),
@@ -119,21 +124,28 @@ async def run_audio_only_pipeline(audio_path: str, output_dir: str, on_progress,
         )
         seg['audioPath'] = line_path
 
-    on_progress(85, 'កំពុងតម្រៀបសំឡេងតួអង្គទាំងអស់តាមពេលវេលា...')
-    master_path = os.path.join(output_dir, 'dialogue_master.wav')
+    on_progress(88, 'កំពុងតម្រៀបសំឡេងតួអង្គទាំងអស់តាមពេលវេលា...')
+    master_path = os.path.join(job_dir, 'dialogue_master.wav')
     await dubber.assemble_timeline_audio(segments, duration, master_path)
 
-    on_progress(93, 'កំពុងលាយសំឡេងខ្មែរជាមួយសំឡេងដើម...')
-    mixed_path = os.path.join(output_dir, 'final_audio.mp3')
-    audio_processor.mix_vocals_with_original(audio_path, master_path, mixed_path, 2.2, 0.85)
+    on_progress(94, 'កំពុងញែក និងលាយសំឡេងខ្មែរជាមួយភ្លេងកំដរដើម...')
+    mixed_path = os.path.join(job_dir, 'final_audio.mp3')
+    await mix_with_clean_background(extracted_audio_path, master_path, mixed_path, job_dir)
 
-    script = "\n".join(
-        f"{s.get('speaker_name') or s.get('speaker_id')}: {s.get('khmer_translation')}" for s in segments
-    )
-    return {'outputAudioPath': mixed_path, 'khmerScript': script}
+    if is_video:
+        on_progress(98, 'កំពុងផ្គុំចូលវីដេអូចុងក្រោយ...')
+        video_ext = os.path.splitext(input_path)[1] or '.mp4'
+        final_path = os.path.join(job_dir, f'dubbed_final{video_ext}')
+        audio_processor.merge_video_audio(input_path, mixed_path, final_path)
+        return {'mediaType': 'video', 'outputPath': final_path}
+
+    return {'mediaType': 'audio', 'outputPath': mixed_path}
 
 
 async def run_job(job_id: str, input_path: str, ref_voice_path: str = None):
+    """Phase 1: analyze — transcribe, translate Chinese to Khmer, and assign
+    a voice per character. Stops at 'review' status so the user can see and
+    correct each character's line before any voice is actually generated."""
     job = jobs[job_id]
     job_dir = os.path.join(OUTPUT_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
@@ -151,24 +163,83 @@ async def run_job(job_id: str, input_path: str, ref_voice_path: str = None):
         on_progress(6, 'កំពុងស្រង់សំឡេងចេញពីឯកសារ...')
         extracted_audio_path = os.path.join(job_dir, 'original_audio.mp3')
         audio_processor.extract_audio(input_path, extracted_audio_path)
+        duration = audio_processor.get_media_duration(input_path if is_video else extracted_audio_path)
 
-        if is_video:
-            dub_options = {'referenceAudioPath': ref_voice_path} if ref_voice_path else {}
-            result = await dubber.process_khmer_dubbing(
-                input_path, extracted_audio_path, job_dir, dub_options, on_progress=on_progress
-            )
-            job['mediaType'] = 'video'
-            job['outputUrl'] = f"/media/{job_id}/{result['outputVideoFilename']}"
-            job['script'] = result.get('khmerScript', '')
-        else:
-            result = await run_audio_only_pipeline(extracted_audio_path, job_dir, on_progress, forced_ref_voice=ref_voice_path)
-            job['mediaType'] = 'audio'
-            job['outputUrl'] = f"/media/{job_id}/{os.path.basename(result['outputAudioPath'])}"
-            job['script'] = result.get('khmerScript', '')
+        on_progress(15, 'AI កំពុងស្តាប់ និងបកប្រែសំដីភាសាចិនទៅជាខ្មែរ...')
+        segments = await dubber.extract_dialogue_timeline(extracted_audio_path, duration, 'full', on_progress)
+        if not segments:
+            raise RuntimeError('AI រកមិនឃើញការសន្ទនាណាមួយក្នុងឯកសារនេះទេ')
 
+        on_progress(42, f'បានរកឃើញឃ្លាសរុប {len(segments)}! កំពុងចាត់តាំងសំឡេងតួអង្គ...')
+        auto_voice_map = {} if ref_voice_path else await dubber.extract_character_voice_samples(extracted_audio_path, segments, job_dir)
+        for seg in segments:
+            seg['_refVoice'] = ref_voice_path or auto_voice_map.get(seg.get('speaker_id'))
+
+        pending_jobs[job_id] = {
+            'job_dir': job_dir,
+            'is_video': is_video,
+            'input_path': input_path,
+            'extracted_audio_path': extracted_audio_path,
+            'duration': duration,
+            'segments': segments,
+        }
+        job['segments'] = [
+            {
+                'id': i,
+                'speakerId': seg.get('speaker_id'),
+                'speakerName': seg.get('speaker_name') or seg.get('speaker_id'),
+                'text': seg.get('khmer_translation', ''),
+            }
+            for i, seg in enumerate(segments)
+        ]
+        job['status'] = 'review'
+        job['progress'] = 45
+        job['message'] = 'សូមពិនិត្យ និងកែសម្រួលឃ្លានីមួយៗរបស់តួអង្គនីមួយៗ (បើត្រូវការ) រួចចុច "បញ្ជាក់ និងបង្កើតសំឡេង"'
+    except Exception as e:
+        traceback.print_exc()
+        job['status'] = 'error'
+        job['error'] = str(e)
+        job['message'] = f'កំហុស: {e}'
+
+
+async def run_render_phase(job_id: str, edits: dict):
+    """Phase 2: after the user reviews/corrects lines in the UI and confirms,
+    actually synthesize the voices and produce the final output."""
+    job = jobs[job_id]
+    pending = pending_jobs.get(job_id)
+    if not pending:
+        job['status'] = 'error'
+        job['error'] = 'Job data expired'
+        job['message'] = 'ទិន្នន័យការងារនេះបានផុតកំណត់ សូមចាប់ផ្តើមម្តងទៀត'
+        return
+
+    def on_progress(pct, msg):
+        job['progress'] = pct
+        job['message'] = msg
+        job['status'] = 'processing'
+
+    try:
+        job['status'] = 'processing'
+        segments = pending['segments']
+        for i, seg in enumerate(segments):
+            edited_text = edits.get(str(i))
+            if edited_text and edited_text.strip():
+                seg['khmer_translation'] = edited_text.strip()
+
+        result = await render_dubbed_output(
+            pending['job_dir'], pending['is_video'], pending['input_path'],
+            pending['extracted_audio_path'], segments, pending['duration'], on_progress,
+        )
+
+        job['mediaType'] = result['mediaType']
+        job['outputUrl'] = f"/media/{job_id}/{os.path.basename(result['outputPath'])}"
+        job['script'] = "\n".join(
+            f"{s.get('speaker_name') or s.get('speaker_id')}: {s.get('khmer_translation')}" for s in segments
+        )
         job['status'] = 'done'
         job['progress'] = 100
         job['message'] = 'ជោគជ័យ! សំឡេងខ្មែររួចរាល់ហើយ 🎉'
+        del pending_jobs[job_id]
     except Exception as e:
         traceback.print_exc()
         job['status'] = 'error'
@@ -204,9 +275,9 @@ async def run_voice_redub_job(job_id: str, video_path: str, voice_path: str):
         mastered_voice_path = os.path.join(job_dir, 'mastered_voice.wav')
         audio_processor.master_vocal_track(clean_voice_path, mastered_voice_path)
 
-        on_progress(75, 'កំពុងលាយសំឡេងចូលជាមួយភ្លេងកំដរដើម...')
+        on_progress(75, 'កំពុងញែក និងលាយសំឡេងចូលជាមួយភ្លេងកំដរដើម...')
         mixed_audio_path = os.path.join(job_dir, 'mixed_audio.mp3')
-        audio_processor.mix_vocals_with_original(original_audio_path, mastered_voice_path, mixed_audio_path, 2.0, 0.85)
+        await mix_with_clean_background(original_audio_path, mastered_voice_path, mixed_audio_path, job_dir)
 
         on_progress(92, 'កំពុងផ្គុំចូលវីដេអូចុងក្រោយ...')
         video_ext = os.path.splitext(video_path)[1] or '.mp4'
@@ -300,9 +371,9 @@ async def run_recreate_voice_job(job_id: str, video_path: str, khmer_audio_path:
         master_path = os.path.join(job_dir, 'recreated_voice_master.wav')
         await dubber.assemble_timeline_audio(segments, duration, master_path)
 
-        on_progress(93, 'កំពុងលាយសំឡេងថ្មីជាមួយភ្លេងកំដរដើម...')
+        on_progress(93, 'កំពុងញែក និងលាយសំឡេងថ្មីជាមួយភ្លេងកំដរដើម...')
         mixed_audio_path = os.path.join(job_dir, 'mixed_audio.mp3')
-        audio_processor.mix_vocals_with_original(original_audio_path, master_path, mixed_audio_path, 2.2, 0.85)
+        await mix_with_clean_background(original_audio_path, master_path, mixed_audio_path, job_dir)
 
         on_progress(97, 'កំពុងផ្គុំចូលវីដេអូចុងក្រោយ...')
         video_ext = os.path.splitext(video_path)[1] or '.mp4'
@@ -471,6 +542,21 @@ def get_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail='Job not found')
     return job
+
+
+@app.post('/api/confirm/{job_id}')
+async def confirm_job(job_id: str, background_tasks: BackgroundTasks, payload: dict = Body(default={})):
+    """Called after the user reviews/edits the per-character lines shown for
+    a 'review' status job — kicks off actual voice synthesis + rendering."""
+    if job_id not in jobs or job_id not in pending_jobs:
+        raise HTTPException(status_code=404, detail='ការងារនេះរកមិនឃើញ ឬបានបង្កើតរួចហើយ')
+
+    edits = payload.get('edits', {}) if isinstance(payload, dict) else {}
+    jobs[job_id]['status'] = 'processing'
+    jobs[job_id]['progress'] = 50
+    jobs[job_id]['message'] = 'កំពុងបង្កើតសំឡេងចុងក្រោយ...'
+    background_tasks.add_task(run_render_phase, job_id, edits)
+    return {'ok': True}
 
 
 @app.get('/api/voices')

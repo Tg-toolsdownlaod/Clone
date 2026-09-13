@@ -87,6 +87,28 @@ def mix_vocals_with_original(original_audio_path: str, dubbed_audio_path: str, o
             run_command(simple_cmd)
             return output_path
 
+def mix_vocals_with_clean_bgm(bgm_path: str, dubbed_audio_path: str, output_path: str, vocal_gain: float = 2.2, bgm_gain: float = 0.9):
+    """
+    Mix new Khmer vocals with an already vocal-free background track (e.g. a
+    Demucs 'no_vocals' stem). Since the original speech is already gone from
+    this track, this skips the aggressive EQ/stereo-width vocal-cancellation
+    trick used by mix_vocals_with_original and keeps the music/effects at
+    their full, unfiltered original tone — so the result sounds much closer
+    to the source video than the notch-filtered approximation.
+    """
+    total_duration = get_media_duration(bgm_path)
+    pad_dur = max(1, math.ceil(total_duration))
+
+    filter_complex = (
+        f"[0:a]apad=whole_dur={pad_dur},volume={vocal_gain},alimiter=limit=0.95[vox];"
+        f"[1:a]volume={bgm_gain}[bgm];"
+        f"[bgm][vox]sidechaincompress=threshold=0.02:ratio=8:attack=15:release=300[ducked_bgm];"
+        f"[vox][ducked_bgm]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0"
+    )
+    cmd = f'ffmpeg -nostdin -y -i "{dubbed_audio_path}" -i "{bgm_path}" -filter_complex "{filter_complex}" -c:a libmp3lame -b:a 192k "{output_path}"'
+    run_command(cmd)
+    return output_path
+
 def merge_video_audio(video_path: str, audio_path: str, output_video_path: str):
     """
     Combine original video with the new dubbed audio track.

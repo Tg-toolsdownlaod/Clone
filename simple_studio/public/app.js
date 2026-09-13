@@ -3,8 +3,13 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * 52;
 const els = {
   uploadCard: document.getElementById('uploadCard'),
   progressCard: document.getElementById('progressCard'),
+  reviewCard: document.getElementById('reviewCard'),
   resultCard: document.getElementById('resultCard'),
   errorCard: document.getElementById('errorCard'),
+
+  reviewList: document.getElementById('reviewList'),
+  reviewConfirmBtn: document.getElementById('reviewConfirmBtn'),
+  reviewCancelBtn: document.getElementById('reviewCancelBtn'),
 
   dropzone: document.getElementById('dropzone'),
   fileInput: document.getElementById('fileInput'),
@@ -72,6 +77,7 @@ const els = {
 
 let selectedFile = null;
 let pollTimer = null;
+let currentJobId = null;
 
 function showToast(message, type = 'info') {
   const toast = document.createElement('div');
@@ -84,6 +90,7 @@ function showToast(message, type = 'info') {
 function showCard(name) {
   els.uploadCard.classList.toggle('hidden', name !== 'upload');
   els.progressCard.classList.toggle('hidden', name !== 'progress');
+  els.reviewCard.classList.toggle('hidden', name !== 'review');
   els.resultCard.classList.toggle('hidden', name !== 'result');
   els.errorCard.classList.toggle('hidden', name !== 'error');
 }
@@ -168,6 +175,8 @@ els.scriptToggleBtn.addEventListener('click', () => {
 
 function resetToUpload() {
   clearInterval(pollTimer);
+  currentJobId = null;
+  els.reviewList.innerHTML = '';
   selectedFile = null;
   els.fileInput.value = '';
   els.videoUrlInput.value = '';
@@ -271,6 +280,7 @@ function uploadFile(file) {
 }
 
 function pollStatus(jobId) {
+  currentJobId = jobId;
   clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
     try {
@@ -280,7 +290,10 @@ function pollStatus(jobId) {
 
       setProgress(job.progress || 0, job.message);
 
-      if (job.status === 'done') {
+      if (job.status === 'review') {
+        clearInterval(pollTimer);
+        showReview(job);
+      } else if (job.status === 'done') {
         clearInterval(pollTimer);
         showResult(job);
       } else if (job.status === 'error') {
@@ -293,6 +306,58 @@ function pollStatus(jobId) {
     }
   }, 1500);
 }
+
+// ----------------------------------------------------
+// Review & edit step — shown after AI transcribes/translates each
+// character's line, before any voice is actually generated, so a
+// misheard line or misassigned character can be corrected first.
+// ----------------------------------------------------
+function showReview(job) {
+  const segments = job.segments || [];
+  els.reviewList.innerHTML = '';
+  segments.forEach((seg) => {
+    const item = document.createElement('div');
+    item.className = 'review-item';
+    item.dataset.id = seg.id;
+    item.innerHTML = `
+      <div class="review-item-speaker">🗣️ ${escapeHtml(seg.speakerName || 'តួអង្គ')}</div>
+      <textarea class="review-item-text" rows="2"></textarea>
+    `;
+    item.querySelector('.review-item-text').value = seg.text || '';
+    els.reviewList.appendChild(item);
+  });
+
+  showCard('review');
+}
+
+els.reviewCancelBtn.addEventListener('click', resetToUpload);
+
+els.reviewConfirmBtn.addEventListener('click', async () => {
+  if (!currentJobId) return;
+  const edits = {};
+  els.reviewList.querySelectorAll('.review-item').forEach((item) => {
+    edits[item.dataset.id] = item.querySelector('.review-item-text').value;
+  });
+
+  els.reviewConfirmBtn.disabled = true;
+  try {
+    const res = await fetch(`/api/confirm/${currentJobId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ edits }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'បញ្ជាក់បរាជ័យ');
+
+    showCard('progress');
+    setProgress(50, 'កំពុងបង្កើតសំឡេងចុងក្រោយ...');
+    pollStatus(currentJobId);
+  } catch (err) {
+    showToast(err.message || 'បញ្ជាក់បរាជ័យ', 'error');
+  } finally {
+    els.reviewConfirmBtn.disabled = false;
+  }
+});
 
 function showResult(job) {
   els.mediaPreview.innerHTML = '';
