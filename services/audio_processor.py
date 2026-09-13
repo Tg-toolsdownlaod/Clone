@@ -87,14 +87,16 @@ def mix_vocals_with_original(original_audio_path: str, dubbed_audio_path: str, o
             run_command(simple_cmd)
             return output_path
 
-def mix_vocals_with_clean_bgm(bgm_path: str, dubbed_audio_path: str, output_path: str, vocal_gain: float = 2.2, bgm_gain: float = 0.9):
+def mix_vocals_with_clean_bgm(bgm_path: str, dubbed_audio_path: str, output_path: str, vocal_gain: float = 2.2, bgm_gain: float = 1.0):
     """
     Mix new Khmer vocals with an already vocal-free background track (e.g. a
     Demucs 'no_vocals' stem). Since the original speech is already gone from
     this track, this skips the aggressive EQ/stereo-width vocal-cancellation
     trick used by mix_vocals_with_original and keeps the music/effects at
     their full, unfiltered original tone — so the result sounds much closer
-    to the source video than the notch-filtered approximation.
+    to the source video than the notch-filtered approximation. Ducking is
+    gentler and releases quicker than the legacy mix so the score keeps its
+    dramatic swell between lines instead of staying flattened throughout.
     """
     total_duration = get_media_duration(bgm_path)
     pad_dur = max(1, math.ceil(total_duration))
@@ -102,7 +104,7 @@ def mix_vocals_with_clean_bgm(bgm_path: str, dubbed_audio_path: str, output_path
     filter_complex = (
         f"[0:a]apad=whole_dur={pad_dur},volume={vocal_gain},alimiter=limit=0.95[vox];"
         f"[1:a]volume={bgm_gain}[bgm];"
-        f"[bgm][vox]sidechaincompress=threshold=0.02:ratio=8:attack=15:release=300[ducked_bgm];"
+        f"[bgm][vox]sidechaincompress=threshold=0.025:ratio=6:attack=15:release=450[ducked_bgm];"
         f"[vox][ducked_bgm]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0"
     )
     cmd = f'ffmpeg -nostdin -y -i "{dubbed_audio_path}" -i "{bgm_path}" -filter_complex "{filter_complex}" -c:a libmp3lame -b:a 192k "{output_path}"'
@@ -199,7 +201,20 @@ def concat_audio_with_pauses(clip_paths: list, pause_ms_list: list, output_path:
         labels.append(f'[a{i}]')
         if i < len(pause_ms_list):
             pause_sec = max(0.0, pause_ms_list[i] / 1000.0)
-            if pause_sec > 0:
+            if pause_sec >= 0.3:
+                # Sentence/ellipsis-length pause: a soft breath instead of dead
+                # silence, so the line reads like a person pausing to breathe
+                # rather than a TTS engine cutting to nothing between clauses.
+                fade = min(0.12, pause_sec / 3.0)
+                fade_out_start = max(0.0, pause_sec - fade)
+                filter_parts.append(
+                    f'anoisesrc=colour=pink:r=44100:d={pause_sec:.3f}:a=0.045,'
+                    f'highpass=f=350,lowpass=f=2200,'
+                    f'afade=t=in:d={fade:.3f},afade=t=out:st={fade_out_start:.3f}:d={fade:.3f},'
+                    f'pan=stereo|FL=c0|FR=c0,aformat=sample_fmts=fltp:channel_layouts=stereo[s{i}]'
+                )
+                labels.append(f'[s{i}]')
+            elif pause_sec > 0:
                 filter_parts.append(f'anullsrc=r=44100:cl=stereo,atrim=duration={pause_sec:.3f}[s{i}]')
                 labels.append(f'[s{i}]')
 

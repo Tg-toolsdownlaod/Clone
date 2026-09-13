@@ -85,16 +85,16 @@ def _pause_ms_for_punct(punct: str) -> int:
 def _clause_prosody(base_pitch_hz: int, base_rate_pct: int, punct: str):
     """Derive a per-clause pitch/rate that layers natural micro-variation and
     punctuation-driven intonation contour on top of the character's base voice."""
-    pitch = base_pitch_hz + random.randint(-2, 2)
-    rate = base_rate_pct + random.randint(-3, 3)
+    pitch = base_pitch_hz + random.randint(-4, 4)
+    rate = base_rate_pct + random.randint(-5, 5)
 
     if '?' in punct:
-        pitch += 7  # rising intonation for questions, like real speech
+        pitch += 10  # rising intonation for questions, like real speech
     elif '!' in punct:
-        pitch += 4
-        rate += 5  # punchier delivery for exclamations
+        pitch += 7
+        rate += 9  # punchier delivery for exclamations
     elif '…' in punct:
-        rate -= 7  # trailing off / hesitation
+        rate -= 10  # trailing off / hesitation
 
     pitch = max(-50, min(50, pitch))
     rate = max(-50, min(50, rate))
@@ -236,17 +236,20 @@ class KhmerDubber:
             pass
 
         if emotion in ['angry', 'fierce', 'heroic']:
-            target_pitch = f"{base_pitch_val - 4:+d}Hz"
-            target_rate = "+5%"
-        elif emotion in ['sad', 'grief']:
-            target_pitch = f"{base_pitch_val - 4:+d}Hz"
-            target_rate = "-8%"
-        elif emotion in ['happy', 'excited']:
-            target_pitch = f"{base_pitch_val + 6:+d}Hz"
+            target_pitch = f"{base_pitch_val - 6:+d}Hz"
             target_rate = "+8%"
-        elif emotion in ['fearful', 'nervous']:
-            target_pitch = f"{base_pitch_val + 10:+d}Hz"
+        elif emotion in ['sad', 'grief']:
+            target_pitch = f"{base_pitch_val - 6:+d}Hz"
+            target_rate = "-12%"
+        elif emotion in ['happy', 'excited']:
+            target_pitch = f"{base_pitch_val + 9:+d}Hz"
             target_rate = "+10%"
+        elif emotion in ['fearful', 'nervous']:
+            target_pitch = f"{base_pitch_val + 12:+d}Hz"
+            target_rate = "+12%"
+        elif emotion == 'dramatic':
+            target_pitch = f"{base_pitch_val - 3:+d}Hz"
+            target_rate = "+4%"
 
         # Preset reference audio mapping for 13 curated characters
         samples_dir = os.path.join(os.path.dirname(__file__), '..', 'samples')
